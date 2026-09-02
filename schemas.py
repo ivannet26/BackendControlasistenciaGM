@@ -1,62 +1,35 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional
 from datetime import datetime
+from typing import Optional
 
-
-# ── Rol ──────────────────────────────────────────────────────────────────────
-
-class RolBase(BaseModel):
-    nombre: str
-    descripcion: Optional[str] = None
-
-class RolOut(RolBase):
-    id: int
-
-    class Config:
-        from_attributes = True  # Lee objetos SQLAlchemy como dicts
-
-
-# ── Usuario ───────────────────────────────────────────────────────────────────
-
+# Para registro
 class UsuarioRegistro(BaseModel):
-    """Lo que el cliente manda al registrarse."""
-    nombre:   str
+    nombre: str
     apellido: str
-    email:    EmailStr
-    password: str          # Texto plano, lo hasheamos en el router
-    rol_id:   Optional[int] = 3  # Por defecto: alumno
+    email: EmailStr
+    password: str
 
+# Para login
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
 
+# Para respuesta
 class UsuarioOut(BaseModel):
-    """Lo que devolvemos al cliente (NUNCA el password_hash)."""
-    id:        int
-    nombre:    str
-    apellido:  str
-    email:     str
-    activo:    bool
-    creado_en: Optional[datetime] = None
-    rol:       Optional[RolOut] = None
-
+    id: int
+    nombre: str
+    apellido: str
+    email: str
+    rol: str
+    activo: bool
+    creado_en: datetime
+    actualizado_en: Optional[datetime]
+    
     class Config:
         from_attributes = True
 
-
-# ── Login / Token ─────────────────────────────────────────────────────────────
-
-class LoginRequest(BaseModel):
-    """Credenciales para hacer login."""
-    email:    EmailStr
-    password: str
-
-
+# Para token
 class Token(BaseModel):
-    """Respuesta del endpoint /login."""
     access_token: str
-    token_type:   str = "bearer"
-
-
-class TokenData(BaseModel):
-    """Datos que guardamos dentro del JWT."""
-    email:    Optional[str] = None
-    rol:      Optional[str] = None
-    usuario_id: Optional[int] = None
+    token_type: str
+    usuario: Optional[dict] = None
