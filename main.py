@@ -1,26 +1,56 @@
 import os
 from dotenv import load_dotenv
-import pandas as pd
-from sqlalchemy import create_engine
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-# Cargar variables del .env
+from database import Base, engine
+from routers import auth as auth_router
+from routers import equipo as equipo_router
+from routers import rastreador as rastreador_router
+from routers import cliente as cliente_router
+from routers import etiqueta as etiqueta_router
+from routers import proyecto as proyecto_router
+import rastreador_models  # noqa: F401
+import equipo_models  # noqa: F401
+import cliente_models  # noqa: F401
+import proyecto_models  # noqa: F401
+
+
+
 load_dotenv()
 
-DB_HOST = os.getenv("DB_HOST")
-DB_PORT = os.getenv("DB_PORT")
-DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
-DB_NAME = os.getenv("DB_NAME")
+# Crea todas las tablas en la BD si no existen
+# (en producción se usa Alembic para migraciones, pero esto funciona perfecto para empezar)
+Base.metadata.create_all(bind=engine)
 
-# Crear conexión a MySQL
-DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-engine = create_engine(DATABASE_URL)
+app = FastAPI(
+    title="Control de Asistencia GM",
+    description="API REST para el sistema de control de asistencia",
+    version="1.0.0",
+)
 
-try:
-    with engine.connect() as connection:
-        print("¡Conexión exitosa a la base de datos de Aiven Cloud!")
-        df = pd.read_sql("SHOW TABLES;", connection)
-        print("\nTablas encontradas:")
-        print(df)
-except Exception as e:
-    print("Error al conectar:", e)
+# ── CORS ──────────────────────────────────────────────────────────────────────
+# Permite que el frontend (React, etc.) se comunique con esta API
+# En producción cambia ["*"] por la URL real del frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ── Routers ───────────────────────────────────────────────────────────────────
+app.include_router(auth_router.router)
+app.include_router(rastreador_router.router)
+app.include_router(equipo_router.router)
+app.include_router(cliente_router.router)
+app.include_router(etiqueta_router.router)
+app.include_router(proyecto_router.router)
+
+
+
+# ── Health check ──────────────────────────────────────────────────────────────
+@app.get("/", tags=["Root"])
+def root():
+    return {"mensaje": "API Control de Asistencia GM activa", "docs": "/docs"}
