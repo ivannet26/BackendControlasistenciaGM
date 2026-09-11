@@ -29,7 +29,6 @@ def _construir_miembro_out(miembro: MiembroEquipo) -> dict:
         "tipo_usuario": miembro.tipo_usuario,
         "estado": miembro.estado,
         "tiene_clave_temp": tiene_clave,
-        # Muestra asteriscos si hay clave, nunca la clave real
         "clave_temp_mascara": "********" if tiene_clave else None,
         "etiquetas": miembro.etiquetas,
         "creado_en": miembro.creado_en,
@@ -106,7 +105,6 @@ def editar_grupo(
         raise HTTPException(status_code=404, detail="Grupo no encontrado")
 
     if datos.nombre is not None:
-        # Verificar que el nuevo nombre no esté en uso por otro grupo
         duplicado = (
             db.query(Grupo)
             .filter(Grupo.nombre == datos.nombre, Grupo.id != grupo_id)
@@ -135,7 +133,6 @@ def borrar_grupo(
     if not grupo:
         raise HTTPException(status_code=404, detail="Grupo no encontrado")
 
-    # Desasignar miembros antes de borrar
     for miembro in grupo.miembros:
         miembro.grupo_id = None
 
@@ -189,9 +186,25 @@ def obtener_miembro(
 def agregar_miembro(
     datos: MiembroCrear,
     db: Session = Depends(get_db),
-    _: Usuario = Depends(get_usuario_actual),
+    usuario_actual: Usuario = Depends(get_usuario_actual),
 ):
-    """Agrega un usuario al equipo."""
+    """
+    Agrega un usuario al equipo.
+    Solo un ADMINISTRACION puede agregar miembros.
+    """
+    # Verificar que quien hace la petición es ADMINISTRACION
+    miembro_actual = (
+        db.query(MiembroEquipo)
+        .filter(MiembroEquipo.usuario_id == usuario_actual.id)
+        .first()
+    )
+    es_admin = miembro_actual and miembro_actual.tipo_usuario.upper() == "ADMINISTRACION"
+    if not es_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo un usuario con tipo ADMINISTRACION puede agregar miembros al equipo",
+        )
+
     # Verificar que el usuario exista
     usuario = db.query(Usuario).filter(Usuario.id == datos.usuario_id).first()
     if not usuario:
@@ -233,13 +246,40 @@ def editar_miembro(
     miembro_id: int,
     datos: MiembroEditar,
     db: Session = Depends(get_db),
-    _: Usuario = Depends(get_usuario_actual),
+    usuario_actual: Usuario = Depends(get_usuario_actual),
 ):
-    """Edita grupo, tipo_usuario, estado o clave_temp de un miembro."""
+    """
+    Edita grupo, tipo_usuario, estado o clave_temp de un miembro.
+
+    Regla de permisos:
+    - Cambiar tipo_usuario, estado o grupo_id → requiere ser ADMINISTRACION en el equipo.
+    - Cambiar clave_temp → cualquier usuario autenticado puede hacerlo.
+    """
     miembro = db.query(MiembroEquipo).filter(MiembroEquipo.id == miembro_id).first()
     if not miembro:
         raise HTTPException(status_code=404, detail="Miembro no encontrado")
 
+    # ── Verificar si el usuario actual intenta cambiar campos sensibles ────────
+    campos_sensibles = (
+        datos.tipo_usuario is not None
+        or datos.estado is not None
+        or datos.grupo_id is not None
+    )
+
+    if campos_sensibles:
+        miembro_actual = (
+            db.query(MiembroEquipo)
+            .filter(MiembroEquipo.usuario_id == usuario_actual.id)
+            .first()
+        )
+        es_admin = miembro_actual and miembro_actual.tipo_usuario.upper() == "ADMINISTRACION"
+        if not es_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Solo un usuario con tipo ADMINISTRACION puede cambiar el tipo, estado o grupo de un miembro",
+            )
+
+    # ── Aplicar cambios ────────────────────────────────────────────────────────
     if datos.grupo_id is not None:
         grupo = db.query(Grupo).filter(Grupo.id == datos.grupo_id).first()
         if not grupo:
@@ -264,9 +304,25 @@ def editar_miembro(
 def eliminar_miembro(
     miembro_id: int,
     db: Session = Depends(get_db),
-    _: Usuario = Depends(get_usuario_actual),
+    usuario_actual: Usuario = Depends(get_usuario_actual),
 ):
-    """Elimina a un miembro del equipo."""
+    """
+    Elimina a un miembro del equipo.
+    Solo un ADMINISTRACION puede eliminar miembros.
+    """
+    # Verificar que quien hace la petición es ADMINISTRACION
+    miembro_actual = (
+        db.query(MiembroEquipo)
+        .filter(MiembroEquipo.usuario_id == usuario_actual.id)
+        .first()
+    )
+    es_admin = miembro_actual and miembro_actual.tipo_usuario.upper() == "ADMINISTRACION"
+    if not es_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo un usuario con tipo ADMINISTRACION puede eliminar miembros del equipo",
+        )
+
     miembro = db.query(MiembroEquipo).filter(MiembroEquipo.id == miembro_id).first()
     if not miembro:
         raise HTTPException(status_code=404, detail="Miembro no encontrado")
@@ -286,7 +342,6 @@ def ver_clave_miembro(
     """
     Muestra si el miembro tiene clave temporal asignada.
     Devuelve la clave enmascarada (asteriscos), NUNCA la clave real.
-    Útil cuando el correo no le llegó al miembro.
     """
     miembro = db.query(MiembroEquipo).filter(MiembroEquipo.id == miembro_id).first()
     if not miembro:
@@ -305,7 +360,7 @@ def ver_clave_miembro(
 # ETIQUETAS DE MIEMBROS
 # ════════════════════════════════════════════════════════════════════════════════
 
-@router.post("/miembros/{miembro_id}/etiquetas/{etiqueta_id}",response_model=MiembroOut, status_code=status.HTTP_200_OK)
+@router.post("/miembros/{miembro_id}/etiquetas/{etiqueta_id}", response_model=MiembroOut, status_code=status.HTTP_200_OK)
 def asignar_etiqueta_a_miembro(
     miembro_id: int,
     etiqueta_id: int,
@@ -324,7 +379,7 @@ def asignar_etiqueta_a_miembro(
     if etiqueta.archivado:
         raise HTTPException(
             status_code=400,
-            detail="No se puede asignar una etiqueta que está archivada", 
+            detail="No se puede asignar una etiqueta que está archivada",
         )
 
     if etiqueta in miembro.etiquetas:
@@ -334,7 +389,7 @@ def asignar_etiqueta_a_miembro(
         )
 
     miembro.etiquetas.append(etiqueta)
-    db.commit() 
+    db.commit()
     db.refresh(miembro)
     return _construir_miembro_out(miembro)
 
@@ -365,4 +420,3 @@ def desasignar_etiqueta_de_miembro(
     db.commit()
     db.refresh(miembro)
     return _construir_miembro_out(miembro)
-
