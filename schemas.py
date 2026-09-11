@@ -42,7 +42,8 @@ class EtiquetaSimple(BaseModel):
     class Config:
         from_attributes = True
     
-    # ============================================================
+
+# ============================================================
 # RASTREADOR DE TAREAS
 # ============================================================
 
@@ -50,6 +51,8 @@ class TareaCreate(BaseModel):
 
     titulo: str
 
+    proyecto_id: int
+    
     descripcion: Optional[str] = None
 
     estado: str = "PENDIENTE"
@@ -71,6 +74,8 @@ class TareaUpdate(BaseModel):
 
     fecha_limite: Optional[date] = None
 
+    proyecto_id: Optional[int] = None 
+
 
 class TareaOut(BaseModel):
 
@@ -86,11 +91,14 @@ class TareaOut(BaseModel):
 
     fecha_limite: Optional[date]
 
+    proyecto_id: Optional[int] = None  
+
+    nombre_proyecto: Optional[str] = None
+
     etiquetas: List[EtiquetaSimple] = []
 
-
     class Config:
-
+        
         from_attributes = True
 
 

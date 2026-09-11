@@ -324,7 +324,7 @@ def asignar_etiqueta_a_miembro(
     if etiqueta.archivado:
         raise HTTPException(
             status_code=400,
-            detail="No se puede asignar una etiqueta que está archivada",
+            detail="No se puede asignar una etiqueta que está archivada", 
         )
 
     if etiqueta in miembro.etiquetas:
@@ -334,7 +334,7 @@ def asignar_etiqueta_a_miembro(
         )
 
     miembro.etiquetas.append(etiqueta)
-    db.commit()
+    db.commit() 
     db.refresh(miembro)
     return _construir_miembro_out(miembro)
 

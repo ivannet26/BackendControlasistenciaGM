@@ -8,6 +8,7 @@ import schemas
 from database import get_db
 from models import Usuario
 from equipo_models import Etiqueta
+from proyecto_models import Proyecto
 from rastreador_models import Tarea, EnlaceRastreador
 from security import get_usuario_actual
 
@@ -82,6 +83,21 @@ def crear_tarea(
             detail="Prioridad inválida"
         )
 
+    if datos.proyecto_id is not None:
+        proyecto = db.query(Proyecto).filter(
+            Proyecto.id == datos.proyecto_id
+        ).first()
+        if not proyecto:
+            raise HTTPException(
+                status_code=404,
+                detail="Proyecto no encontrado"
+            )
+        if proyecto.archivado:
+            raise HTTPException(
+                status_code=400,
+                detail="No se puede asignar un proyecto archivado"
+            )
+
     tarea = Tarea(
         usuario_id=usuario.id,
         **datos.model_dump()
@@ -97,37 +113,39 @@ def crear_tarea(
 # ============================================================
 # LISTAR TAREAS
 # ============================================================
-
 @router.get(
     "/tareas",
     response_model=list[schemas.TareaOut]
 )
 def listar_tareas(
     estado: str | None = None,
+    proyecto_id: int | None = None,
     db: Session = Depends(get_db),
     usuario=Depends(get_usuario_actual)
 ):
-
     query = db.query(Tarea).filter(
         Tarea.usuario_id == usuario.id
     )
-
     if estado:
-
         estado = estado.upper()
-
         if estado not in ESTADOS:
             raise HTTPException(
                 status_code=400,
                 detail="Estado inválido"
             )
-
         query = query.filter(
             Tarea.estado == estado
         )
 
+    # Filtro opcional por proyecto
+    if proyecto_id is not None:
+        query = query.filter(
+            Tarea.proyecto_id == proyecto_id
+        )
+
     return query.order_by(
-        Tarea.fecha_limite.asc().nullslast(),
+        Tarea.fecha_limite.is_(None),
+        Tarea.fecha_limite.asc(),
         Tarea.id.desc()
     ).all()
 
@@ -135,7 +153,6 @@ def listar_tareas(
 # ============================================================
 # ACTUALIZAR TAREA
 # ============================================================
-
 @router.put(
     "/tareas/{tarea_id}",
     response_model=schemas.TareaOut
@@ -146,44 +163,51 @@ def actualizar_tarea(
     db: Session = Depends(get_db),
     usuario=Depends(get_usuario_actual)
 ):
-
     tarea = obtener_tarea_o_404(
         db,
         tarea_id,
         usuario.id
     )
-
     cambios = datos.model_dump(
         exclude_unset=True
     )
-
     if "estado" in cambios:
-
         if cambios["estado"] not in ESTADOS:
             raise HTTPException(
                 status_code=400,
                 detail="Estado inválido"
             )
-
     if "prioridad" in cambios:
-
         if cambios["prioridad"] not in PRIORIDADES:
             raise HTTPException(
                 status_code=400,
                 detail="Prioridad inválida"
             )
 
-    for campo, valor in cambios.items():
+    proyecto = (
+        db.query(Proyecto)
+        .filter(Proyecto.id == datos.proyecto_id)
+        .first()
+    )
+    if not proyecto:
+        raise HTTPException(
+            status_code=404,
+            detail="Proyecto no encontrado"
+        )
+    if proyecto.archivado:
+        raise HTTPException(
+            status_code=400,
+            detail="No se puede asignar un proyecto archivado"
+        )
 
+    for campo, valor in cambios.items():
         setattr(
             tarea,
             campo,
             valor
         )
-
     db.commit()
     db.refresh(tarea)
-
     return tarea
 
 
@@ -477,7 +501,9 @@ def consultar_rastreador_publico(
     ).filter(
         Tarea.usuario_id == enlace.usuario_id
     ).order_by(
-        Tarea.fecha_limite.asc().nullslast()
+        Tarea.fecha_limite.is_(None),
+        Tarea.fecha_limite.asc(),
+        Tarea.id.desc()
     ).all()
 
     total = len(tareas)

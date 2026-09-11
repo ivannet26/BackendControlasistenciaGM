@@ -10,10 +10,13 @@ from routers import rastreador as rastreador_router
 from routers import cliente as cliente_router
 from routers import etiqueta as etiqueta_router
 from routers import proyecto as proyecto_router
+from routers import panel as panel_router
+from routers import informes as informes_router
 import rastreador_models  # noqa: F401
 import equipo_models  # noqa: F401
 import cliente_models  # noqa: F401
 import proyecto_models  # noqa: F401
+
 
 
 
@@ -47,6 +50,8 @@ app.include_router(equipo_router.router)
 app.include_router(cliente_router.router)
 app.include_router(etiqueta_router.router)
 app.include_router(proyecto_router.router)
+app.include_router(panel_router.router)
+app.include_router(informes_router.router)
 
 
 

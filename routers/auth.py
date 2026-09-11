@@ -14,6 +14,7 @@ from security import (
 )
 from database import get_db
 
+
 router = APIRouter(prefix="/auth", tags=["Autenticación"])
 
 # ── POST /auth/registro ───────────────────────────────────────────────────────
@@ -75,6 +76,7 @@ def login(datos: schemas.LoginRequest, db: Session = Depends(get_db)):
         },
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
+
 
     return {
         "access_token": token,
