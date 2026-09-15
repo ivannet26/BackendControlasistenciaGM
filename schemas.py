@@ -61,6 +61,10 @@ class TareaCreate(BaseModel):
 
     fecha_limite: Optional[date] = None
 
+    horas: Optional[float] = 0.0
+
+    etiqueta_ids: Optional[List[int]] = []
+
 
 class TareaUpdate(BaseModel):
 
@@ -74,7 +78,11 @@ class TareaUpdate(BaseModel):
 
     fecha_limite: Optional[date] = None
 
+    horas: Optional[float] = None
+
     proyecto_id: Optional[int] = None 
+
+    etiqueta_ids: Optional[List[int]] = None
 
 
 class TareaOut(BaseModel):
@@ -91,9 +99,13 @@ class TareaOut(BaseModel):
 
     fecha_limite: Optional[date]
 
+    horas: float = 0.0
+
     proyecto_id: Optional[int] = None  
 
     nombre_proyecto: Optional[str] = None
+
+    color_proyecto: Optional[str] = None
 
     etiquetas: List[EtiquetaSimple] = []
 
@@ -129,3 +141,43 @@ class RastreadorPublico(RastreadorResumen):
     nombre: str
 
     tareas: list[TareaOut]
+
+
+# ============================================================
+# TEMPORIZADOR / TIME TRACKER
+# ============================================================
+
+class TiempoIniciar(BaseModel):
+
+    proyecto_id: int
+
+    tarea_id: Optional[int] = None
+
+    descripcion: Optional[str] = None
+
+
+class TiempoRegistroOut(BaseModel):
+
+    id: int
+
+    proyecto_id: int
+
+    nombre_proyecto: Optional[str] = None
+
+    color_proyecto: Optional[str] = None
+
+    tarea_id: Optional[int] = None
+
+    titulo_tarea: Optional[str] = None
+
+    descripcion: Optional[str] = None
+
+    inicio: datetime
+
+    fin: Optional[datetime] = None
+
+    duracion_segundos: int
+
+    class Config:
+        
+        from_attributes = True

@@ -29,6 +29,7 @@ class ProyectoOut(BaseModel):
     estado: str
     color: Optional[str]
     archivado: bool
+    horas_registradas: float = 0.0
     creado_en: datetime
     actualizado_en: Optional[datetime]
 

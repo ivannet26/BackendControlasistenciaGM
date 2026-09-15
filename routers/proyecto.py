@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
+from sqlalchemy import func
 
 from database import get_db
 from models import Usuario
 from cliente_models import Cliente
 from proyecto_models import Proyecto
+from rastreador_models import Tarea
 from proyecto_schemas import (
     ProyectoCrear,
     ProyectoEditar,
@@ -24,7 +26,12 @@ router = APIRouter(
 # FUNCIÓN AUXILIAR
 # ============================================================
 
-def construir_proyecto_out(proyecto: Proyecto) -> dict:
+def construir_proyecto_out(proyecto: Proyecto, db: Session) -> dict:
+    total_horas = (
+        db.query(func.coalesce(func.sum(Tarea.horas), 0.0))
+        .filter(Tarea.proyecto_id == proyecto.id)
+        .scalar()
+    )
 
     return {
         "id": proyecto.id,
@@ -39,6 +46,7 @@ def construir_proyecto_out(proyecto: Proyecto) -> dict:
         "estado": proyecto.estado,
         "color": proyecto.color,
         "archivado": proyecto.archivado,
+        "horas_registradas": round(float(total_horas), 2),
         "creado_en": proyecto.creado_en,
         "actualizado_en": proyecto.actualizado_en,
     }
@@ -105,7 +113,7 @@ def listar_proyectos(
     ).all()
 
     return [
-        construir_proyecto_out(proyecto)
+        construir_proyecto_out(proyecto, db)
         for proyecto in proyectos
     ]
 
@@ -136,7 +144,7 @@ def obtener_proyecto(
             detail="Proyecto no encontrado"
         )
 
-    return construir_proyecto_out(proyecto)
+    return construir_proyecto_out(proyecto, db)
 
 
 # ============================================================
@@ -203,7 +211,7 @@ def crear_proyecto(
     db.commit()
     db.refresh(proyecto)
 
-    return construir_proyecto_out(proyecto)
+    return construir_proyecto_out(proyecto, db)
 
 
 # ============================================================
@@ -291,7 +299,7 @@ def editar_proyecto(
     db.commit()
     db.refresh(proyecto)
 
-    return construir_proyecto_out(proyecto)
+    return construir_proyecto_out(proyecto, db)
 
 
 # ============================================================
@@ -332,7 +340,7 @@ def archivar_proyecto(
     db.commit()
     db.refresh(proyecto)
 
-    return construir_proyecto_out(proyecto)
+    return construir_proyecto_out(proyecto, db)
 
 
 # ============================================================
@@ -373,7 +381,7 @@ def desarchivar_proyecto(
     db.commit()
     db.refresh(proyecto)
 
-    return construir_proyecto_out(proyecto)
+    return construir_proyecto_out(proyecto, db)
 
 
 # ============================================================
