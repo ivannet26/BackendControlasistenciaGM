@@ -14,7 +14,60 @@ from security import get_usuario_actual
 router = APIRouter(prefix="/equipo", tags=["Equipo"])
 
 
-# ── Función auxiliar para construir MiembroOut ────────────────────────────────
+# ════════════════════════════════════════════════════════════════════════════════
+# CONSTANTES
+# ════════════════════════════════════════════════════════════════════════════════
+
+
+ROLES_ADMIN = {"ADMINISTRACION", "ADMINISTRADOR", "ADMIN"}
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# FUNCIÓN AUXILIAR PARA VALIDAR ADMIN
+# ════════════════════════════════════════════════════════════════════════════════
+
+def verificar_es_admin(
+    db: Session,
+    usuario_actual: Usuario,
+    mensaje_error: str = "Solo un usuario con tipo ADMINISTRACION puede realizar esta acción"
+):
+    """
+    Verifica si el usuario es admin por dos vías:
+    1) Rol global en usuariosPrueba.rol
+    2) Tipo en miembro_equipo.tipo_usuario
+    """
+
+    # 1) Rol global
+    rol_global = (usuario_actual.rol or "").strip().upper()
+    es_admin_global = rol_global in ROLES_ADMIN
+
+    # 2) Tipo en la tabla del equipo
+    miembro_actual = (
+        db.query(MiembroEquipo)
+        .filter(MiembroEquipo.usuario_id == usuario_actual.id)
+        .first()
+    )
+    tipo_equipo = (
+        (miembro_actual.tipo_usuario or "").strip().upper()
+        if miembro_actual else ""
+    )
+    es_admin_equipo = tipo_equipo in ROLES_ADMIN
+
+    # Permitir si es admin por cualquiera de las dos vías
+    if not (es_admin_global or es_admin_equipo):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"{mensaje_error}. "
+                f"Tu rol global es '{rol_global or 'SIN ROL'}' "
+                f"y tu tipo de equipo es '{tipo_equipo or 'NO ESTÁS EN EL EQUIPO'}'"
+            ),
+        )
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# FUNCIÓN AUXILIAR PARA CONSTRUIR MIEMBROOUT
+# ════════════════════════════════════════════════════════════════════════════════
 
 def _construir_miembro_out(miembro: MiembroEquipo) -> dict:
     """Convierte un MiembroEquipo + sus relaciones en el dict de respuesta."""
@@ -45,8 +98,24 @@ def listar_grupos(
     db: Session = Depends(get_db),
     _: Usuario = Depends(get_usuario_actual),
 ):
-    """Devuelve todos los grupos existentes."""
-    return db.query(Grupo).order_by(Grupo.nombre).all()
+    """Devuelve todos los grupos con sus miembros."""
+
+    grupos = db.query(Grupo).order_by(Grupo.nombre).all()
+
+    return [
+        {
+            "id": g.id,
+            "nombre": g.nombre,
+            "descripcion": g.descripcion,
+            "creado_en": g.creado_en,
+            "miembros_count": len(g.miembros),
+            "miembros": [
+                f"{m.usuario.nombre} {m.usuario.apellido}"
+                for m in g.miembros
+            ],
+        }
+        for g in grupos
+    ]
 
 
 @router.get("/grupos/{grupo_id}", response_model=GrupoConMiembrosOut)
@@ -190,20 +259,15 @@ def agregar_miembro(
 ):
     """
     Agrega un usuario al equipo.
-    Solo un ADMINISTRACION puede agregar miembros.
+    Solo un ADMINISTRACION / ADMINISTRADOR / ADMIN puede agregar miembros.
     """
-    # Verificar que quien hace la petición es ADMINISTRACION
-    miembro_actual = (
-        db.query(MiembroEquipo)
-        .filter(MiembroEquipo.usuario_id == usuario_actual.id)
-        .first()
+
+   
+    verificar_es_admin(
+        db,
+        usuario_actual,
+        mensaje_error="Solo un usuario con tipo ADMINISTRACION puede agregar miembros al equipo"
     )
-    es_admin = miembro_actual and miembro_actual.tipo_usuario.upper() == "ADMINISTRACION"
-    if not es_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo un usuario con tipo ADMINISTRACION puede agregar miembros al equipo",
-        )
 
     # Verificar que el usuario exista
     usuario = db.query(Usuario).filter(Usuario.id == datos.usuario_id).first()
@@ -267,17 +331,11 @@ def editar_miembro(
     )
 
     if campos_sensibles:
-        miembro_actual = (
-            db.query(MiembroEquipo)
-            .filter(MiembroEquipo.usuario_id == usuario_actual.id)
-            .first()
+        verificar_es_admin(
+            db,
+            usuario_actual,
+            mensaje_error="Solo un usuario con tipo ADMINISTRACION puede cambiar el tipo, estado o grupo de un miembro"
         )
-        es_admin = miembro_actual and miembro_actual.tipo_usuario.upper() == "ADMINISTRACION"
-        if not es_admin:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Solo un usuario con tipo ADMINISTRACION puede cambiar el tipo, estado o grupo de un miembro",
-            )
 
     # ── Aplicar cambios ────────────────────────────────────────────────────────
     if datos.grupo_id is not None:
@@ -308,20 +366,15 @@ def eliminar_miembro(
 ):
     """
     Elimina a un miembro del equipo.
-    Solo un ADMINISTRACION puede eliminar miembros.
+    Solo un ADMINISTRACION / ADMINISTRADOR / ADMIN puede eliminar miembros.
     """
-    # Verificar que quien hace la petición es ADMINISTRACION
-    miembro_actual = (
-        db.query(MiembroEquipo)
-        .filter(MiembroEquipo.usuario_id == usuario_actual.id)
-        .first()
+
+    
+    verificar_es_admin(
+        db,
+        usuario_actual,
+        mensaje_error="Solo un usuario con tipo ADMINISTRACION puede eliminar miembros del equipo"
     )
-    es_admin = miembro_actual and miembro_actual.tipo_usuario.upper() == "ADMINISTRACION"
-    if not es_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo un usuario con tipo ADMINISTRACION puede eliminar miembros del equipo",
-        )
 
     miembro = db.query(MiembroEquipo).filter(MiembroEquipo.id == miembro_id).first()
     if not miembro:
@@ -331,7 +384,9 @@ def eliminar_miembro(
     db.commit()
 
 
-# ── Endpoint especial: ver clave temporal en asteriscos ───────────────────────
+# ════════════════════════════════════════════════════════════════════════════════
+# ENDPOINT ESPECIAL: VER CLAVE TEMPORAL EN ASTERISCOS
+# ════════════════════════════════════════════════════════════════════════════════
 
 @router.get("/miembros/{miembro_id}/clave", response_model=dict)
 def ver_clave_miembro(

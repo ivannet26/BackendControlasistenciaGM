@@ -7,7 +7,7 @@ from database import get_db
 from models import Usuario
 from cliente_models import Cliente
 from proyecto_models import Proyecto
-from rastreador_models import Tarea
+from rastreador_models import TiempoRegistro
 from proyecto_schemas import (
     ProyectoCrear,
     ProyectoEditar,
@@ -27,11 +27,24 @@ router = APIRouter(
 # ============================================================
 
 def construir_proyecto_out(proyecto: Proyecto, db: Session) -> dict:
-    total_horas = (
-        db.query(func.coalesce(func.sum(Tarea.horas), 0.0))
-        .filter(Tarea.proyecto_id == proyecto.id)
+    """
+    Construye la respuesta de un proyecto incluyendo:
+    - horas_registradas: float (para compatibilidad)
+    - segundos_registrados: int (valor exacto, sin redondeo)
+    """
+
+    # Suma exacta de segundos de todas las actividades terminadas
+    total_segundos = (
+        db.query(func.coalesce(func.sum(TiempoRegistro.duracion_segundos), 0))
+        .filter(
+            TiempoRegistro.proyecto_id == proyecto.id,
+            TiempoRegistro.fin.is_not(None)
+        )
         .scalar()
     )
+
+    total_segundos = int(total_segundos)
+    horas_registradas = round(total_segundos / 3600, 2)
 
     return {
         "id": proyecto.id,
@@ -46,7 +59,8 @@ def construir_proyecto_out(proyecto: Proyecto, db: Session) -> dict:
         "estado": proyecto.estado,
         "color": proyecto.color,
         "archivado": proyecto.archivado,
-        "horas_registradas": round(float(total_horas), 2),
+        "horas_registradas": horas_registradas,
+        "segundos_registrados": total_segundos,
         "creado_en": proyecto.creado_en,
         "actualizado_en": proyecto.actualizado_en,
     }

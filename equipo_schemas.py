@@ -15,6 +15,8 @@ class GrupoOut(BaseModel):
     nombre: str
     descripcion: Optional[str]
     creado_en: datetime
+    miembros_count: int = 0                   
+    miembros: List[str] = []     
     class Config:
         from_attributes = True
 
