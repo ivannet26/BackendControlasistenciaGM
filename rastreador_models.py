@@ -1,3 +1,6 @@
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from sqlalchemy import (
     Boolean,
     Column,
@@ -10,8 +13,10 @@ from sqlalchemy import (
     Numeric
 )
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
 from database import Base
+
+
+TZ_PERU = ZoneInfo("America/Lima")
 
 
 class Tarea(Base):
@@ -72,12 +77,13 @@ class Tarea(Base):
 
     creada_en = Column(
         DateTime(timezone=True),
-        server_default=func.now()
+        default=lambda: datetime.now(TZ_PERU)
     )
 
     actualizada_en = Column(
         DateTime(timezone=True),
-        onupdate=func.now()
+        default=lambda: datetime.now(TZ_PERU),
+        onupdate=lambda: datetime.now(TZ_PERU)
     )
 
     # ========================================================
@@ -141,7 +147,7 @@ class EnlaceRastreador(Base):
 
     creado_en = Column(
         DateTime(timezone=True),
-        server_default=func.now()
+        default=lambda: datetime.now(TZ_PERU)
     )
 
 
@@ -211,7 +217,7 @@ class TiempoRegistro(Base):
 
     creado_en = Column(
         DateTime(timezone=True),
-        server_default=func.now()
+        default=lambda: datetime.now(TZ_PERU)
     )
 
     # ========================================================

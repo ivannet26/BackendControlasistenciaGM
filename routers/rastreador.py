@@ -1,5 +1,8 @@
 import secrets
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
+
+TZ_PERU = ZoneInfo("America/Lima")
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -418,7 +421,7 @@ def resumen(
     vencidas = sum(
         t.estado != "COMPLETADA"
         and t.fecha_limite is not None
-        and t.fecha_limite < date.today()
+        and t.fecha_limite < datetime.now(TZ_PERU).date()
         for t in tareas
     )
 
@@ -576,7 +579,7 @@ def consultar_rastreador_publico(
     vencidas = sum(
         t.estado != "COMPLETADA"
         and t.fecha_limite is not None
-        and t.fecha_limite < date.today()
+        and t.fecha_limite < datetime.now(TZ_PERU).date()
         for t in tareas
     )
 
@@ -668,7 +671,7 @@ def iniciar_temporizador(
         proyecto_id=datos.proyecto_id,
         tarea_id=datos.tarea_id,
         descripcion=datos.descripcion,
-        inicio=datetime.now(),
+        inicio=datetime.now(TZ_PERU),
         fin=None,
         duracion_segundos=0
     )
@@ -705,7 +708,7 @@ def detener_temporizador(
             detail="No hay ningún temporizador activo para detener"
         )
 
-    ahora = datetime.now()
+    ahora = datetime.now(TZ_PERU)
     segundos_transcurridos = int((ahora - registro.inicio).total_seconds())
 
     registro.fin = ahora
@@ -780,7 +783,8 @@ def historial_tiempos(
         query = query.filter(
             TiempoRegistro.inicio >= datetime.combine(
                 fecha_desde,
-                datetime.min.time()
+                datetime.min.time(),
+                tzinfo=TZ_PERU
             )
         )
 
@@ -789,7 +793,8 @@ def historial_tiempos(
         query = query.filter(
             TiempoRegistro.inicio <= datetime.combine(
                 fecha_hasta,
-                datetime.max.time()
+                datetime.max.time(),
+                tzinfo=TZ_PERU
             )
         )
 
