@@ -15,8 +15,6 @@ from equipo_models import MiembroEquipo, Etiqueta
 from rastreador_models import Tarea, TiempoRegistro
 
 from security import get_usuario_actual
-from jinja2 import Environment, FileSystemLoader
-from weasyprint import HTML
 import os
 from zoneinfo import ZoneInfo
 
@@ -40,12 +38,8 @@ def formatear_segundos(segundos: int) -> str:
 
 
 def ruta_imagen(nombre: str) -> str:
-    """
-    Devuelve la ruta absoluta de una imagen dentro de la carpeta assets,
-    en formato file:/// compatible con WeasyPrint en Windows.
-    """
-    ruta = os.path.join(os.path.dirname(__file__), "assets", nombre)
-    return "file:///" + ruta.replace("\\", "/")
+    """Devuelve la ruta absoluta de una imagen en assets."""
+    return os.path.join(os.path.dirname(__file__), "assets", nombre)
 
 
 # ============================================================
@@ -57,7 +51,6 @@ def informe_resumen(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_usuario_actual)
 ):
-
     total_proyectos = db.query(Proyecto).count()
     proyectos_activos = db.query(Proyecto).filter(Proyecto.archivado == False).count()
     proyectos_archivados = db.query(Proyecto).filter(Proyecto.archivado == True).count()
@@ -116,38 +109,31 @@ def informe_tareas(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_usuario_actual)
 ):
-
     query = db.query(Tarea)
 
     if estado:
         query = query.filter(Tarea.estado == estado.upper())
-
     if prioridad:
         query = query.filter(Tarea.prioridad == prioridad.upper())
-
     if fecha_desde:
         query = query.filter(Tarea.fecha_limite >= fecha_desde)
-
     if fecha_hasta:
         query = query.filter(Tarea.fecha_limite <= fecha_hasta)
 
     tareas = query.order_by(Tarea.fecha_limite.asc()).all()
 
     total = len(tareas)
-
     pendientes = sum(1 for tarea in tareas if tarea.estado == "PENDIENTE")
     en_progreso = sum(1 for tarea in tareas if tarea.estado == "EN_PROGRESO")
     completadas = sum(1 for tarea in tareas if tarea.estado == "COMPLETADA")
 
     hoy = date.today()
-
     vencidas = sum(
         1 for tarea in tareas
         if (tarea.fecha_limite and tarea.fecha_limite < hoy and tarea.estado != "COMPLETADA")
     )
 
     detalle = []
-
     for tarea in tareas:
         detalle.append({
             "id": tarea.id,
@@ -183,19 +169,16 @@ def informe_proyectos(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_usuario_actual)
 ):
-
     query = db.query(Proyecto)
 
     if estado:
         query = query.filter(Proyecto.estado == estado.upper())
-
     if cliente_id is not None:
         query = query.filter(Proyecto.cliente_id == cliente_id)
 
     proyectos = query.order_by(Proyecto.nombre.asc()).all()
 
     resultado = []
-
     for proyecto in proyectos:
         resultado.append({
             "id": proyecto.id,
@@ -225,7 +208,6 @@ def informe_clientes(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_usuario_actual)
 ):
-
     query = db.query(Cliente)
 
     if not incluir_archivados:
@@ -234,7 +216,6 @@ def informe_clientes(
     clientes = query.order_by(Cliente.nombre.asc()).all()
 
     resultado = []
-
     for cliente in clientes:
         cantidad_proyectos = (
             db.query(Proyecto)
@@ -265,34 +246,24 @@ def informe_clientes(
 
 @router.get("/tiempo")
 def informe_tiempo(
-    fecha_desde: Optional[date] = Query(None, description="Fecha de inicio del rango (YYYY-MM-DD)"),
-    fecha_hasta: Optional[date] = Query(None, description="Fecha de fin del rango (YYYY-MM-DD)"),
-    estado: Optional[str] = Query(None, description="PENDIENTE, EN_PROGRESO o COMPLETADA"),
-    prioridad: Optional[str] = Query(None, description="BAJA, MEDIA o ALTA"),
-    usuario_id: Optional[int] = Query(None, description="Filtrar por miembro del equipo (usuario_id)"),
+    fecha_desde: Optional[date] = Query(None),
+    fecha_hasta: Optional[date] = Query(None),
+    estado: Optional[str] = Query(None),
+    prioridad: Optional[str] = Query(None),
+    usuario_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_usuario_actual)
 ):
-    """
-    Informe de tareas agrupadas por rango de fechas.
-    Filtra por fecha_limite dentro del rango indicado.
-    Si no se indica rango, devuelve todas las tareas.
-    """
-
     query = db.query(Tarea)
 
     if fecha_desde:
         query = query.filter(Tarea.fecha_limite >= fecha_desde)
-
     if fecha_hasta:
         query = query.filter(Tarea.fecha_limite <= fecha_hasta)
-
     if estado:
         query = query.filter(Tarea.estado == estado.upper())
-
     if prioridad:
         query = query.filter(Tarea.prioridad == prioridad.upper())
-
     if usuario_id is not None:
         query = query.filter(Tarea.usuario_id == usuario_id)
 
@@ -331,10 +302,7 @@ def informe_tiempo(
     ]
 
     return {
-        "periodo": {
-            "desde": fecha_desde,
-            "hasta": fecha_hasta,
-        },
+        "periodo": {"desde": fecha_desde, "hasta": fecha_hasta},
         "resumen": {
             "total":              total,
             "pendientes":         pendientes,
@@ -349,12 +317,11 @@ def informe_tiempo(
 
 # ============================================================
 # EXPORTACION DE INFORME DE TIEMPOS (CSV O EXCEL)
-# Filtra siempre por el usuario logueado
 # ============================================================
 
 @router.get("/tiempo/exportar")
 def exportar_informe_tiempo(
-    formato: str = Query("csv", description="Formato de exportacion: 'csv' o 'excel'"),
+    formato: str = Query("csv"),
     fecha_desde: Optional[date] = Query(None),
     fecha_hasta: Optional[date] = Query(None),
     proyecto_id: Optional[int] = Query(None),
@@ -363,14 +330,6 @@ def exportar_informe_tiempo(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_usuario_actual)
 ):
-    """
-    Genera y descarga el archivo con los tiempos filtrados.
-    Soporta formato=csv o formato=excel.
-
-    Siempre filtra por el usuario logueado, excepto si se pasa
-    explicitamente un usuario_id (util para admins).
-    """
-
     query = (
         db.query(TiempoRegistro, Usuario, Proyecto)
         .join(Usuario, TiempoRegistro.usuario_id == Usuario.id)
@@ -378,25 +337,19 @@ def exportar_informe_tiempo(
         .filter(TiempoRegistro.fin.is_not(None))
     )
 
-    # Filtros de fecha
     if fecha_desde:
         query = query.filter(
             TiempoRegistro.inicio >= datetime.combine(fecha_desde, datetime.min.time())
         )
-
     if fecha_hasta:
         query = query.filter(
             TiempoRegistro.inicio <= datetime.combine(fecha_hasta, datetime.max.time())
         )
-
-    # Filtros opcionales
     if proyecto_id is not None:
         query = query.filter(TiempoRegistro.proyecto_id == proyecto_id)
-
     if cliente_id is not None:
         query = query.filter(Proyecto.cliente_id == cliente_id)
 
-    # Filtro por usuario
     if usuario_id is not None:
         query = query.filter(TiempoRegistro.usuario_id == usuario_id)
     else:
@@ -404,19 +357,14 @@ def exportar_informe_tiempo(
 
     filas = query.order_by(TiempoRegistro.inicio.desc()).all()
 
-    # Preparar datos
     datos = []
-
     for reg, user, proy in filas:
-
         nombre_cliente = (
             proy.cliente.nombre
             if proy and proy.cliente
             else "Sin cliente"
         )
-
         titulo_tarea = reg.tarea.titulo if reg.tarea else ""
-
         inicio_str = reg.inicio.strftime("%Y-%m-%d %H:%M:%S") if reg.inicio else ""
         fin_str = reg.fin.strftime("%Y-%m-%d %H:%M:%S") if reg.fin else ""
 
@@ -441,44 +389,27 @@ def exportar_informe_tiempo(
 
     nombre_archivo = f"informe_tiempo_{date.today().strftime('%Y%m%d')}"
 
-    # Excel
     if formato.lower() == "excel":
         import pandas as pd
-
         df = pd.DataFrame(datos, columns=columnas)
-
         buffer_salida = io.BytesIO()
-
         with pd.ExcelWriter(buffer_salida, engine="openpyxl") as writer:
             df.to_excel(writer, index=False, sheet_name="Tiempos")
-
         buffer_salida.seek(0)
-
-        headers = {
-            "Content-Disposition": f"attachment; filename={nombre_archivo}.xlsx"
-        }
-
+        headers = {"Content-Disposition": f"attachment; filename={nombre_archivo}.xlsx"}
         return StreamingResponse(
             buffer_salida,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers=headers
         )
 
-    # CSV (por defecto)
     buffer_texto = io.StringIO()
-
     escritor = csv.DictWriter(buffer_texto, fieldnames=columnas)
     escritor.writeheader()
-
     if datos:
         escritor.writerows(datos)
-
     contenido_bytes = buffer_texto.getvalue().encode("utf-8-sig")
-
-    headers = {
-        "Content-Disposition": f"attachment; filename={nombre_archivo}.csv"
-    }
-
+    headers = {"Content-Disposition": f"attachment; filename={nombre_archivo}.csv"}
     return StreamingResponse(
         io.BytesIO(contenido_bytes),
         media_type="text/csv",
@@ -500,12 +431,7 @@ def datos_informe_tiempo(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_usuario_actual)
 ):
-    """
-    Devuelve los tiempos del periodo agrupados por dia, proyecto y actividad.
-    Solo del usuario actual (para informes personales).
-    """
     from datetime import time as time_type, timedelta
-    from zoneinfo import ZoneInfo
 
     TZ_PERU = ZoneInfo("America/Lima")
 
@@ -530,7 +456,6 @@ def datos_informe_tiempo(
         segs = int((ahora - inicio).total_seconds())
         return max(segs, 0)
 
-    # Filtro por usuario (siempre el logueado, salvo que se pase usuario_id)
     query = db.query(TiempoRegistro).filter(
         TiempoRegistro.inicio >= inicio_dt,
         TiempoRegistro.inicio <= fin_dt
@@ -590,7 +515,7 @@ def datos_informe_tiempo(
         if pid not in por_proyecto_dict:
             por_proyecto_dict[pid] = {
                 "nombre": r.proyecto.nombre,
-                "color": getattr(r.proyecto, "color", "#b06fd8"),
+                "color": getattr(r.proyecto, "color", "#3d4a52"),
                 "segundos": 0
             }
         por_proyecto_dict[pid]["segundos"] += segundos_de_registro(r)
@@ -632,7 +557,7 @@ def datos_informe_tiempo(
 
 
 # ============================================================
-# EXPORTAR INFORME DE TIEMPO EN PDF
+# EXPORTAR INFORME DE TIEMPO EN PDF (fpdf2)
 # ============================================================
 
 @router.get("/tiempo/exportar/pdf")
@@ -646,13 +571,13 @@ def exportar_informe_pdf(
     usuario_actual: Usuario = Depends(get_usuario_actual)
 ):
     """
-    Genera y descarga el informe de tiempo en PDF con formato formal.
+    Genera y descarga el informe de tiempo en PDF usando fpdf2.
     """
+    from fpdf import FPDF
     from datetime import time as time_type, timedelta
 
     TZ_PERU = ZoneInfo("America/Lima")
 
-    # Rango por defecto: semana actual
     if not fecha_desde:
         fecha_desde = date.today() - timedelta(days=date.today().weekday())
     if not fecha_hasta:
@@ -673,7 +598,6 @@ def exportar_informe_pdf(
             inicio = inicio.replace(tzinfo=TZ_PERU)
         return max(int((ahora - inicio).total_seconds()), 0)
 
-    # Query filtrada por usuario
     query = db.query(TiempoRegistro).filter(
         TiempoRegistro.inicio >= inicio_dt,
         TiempoRegistro.inicio <= fin_dt
@@ -692,7 +616,6 @@ def exportar_informe_pdf(
     if cliente_id is not None:
         registros = [r for r in registros if r.proyecto and r.proyecto.cliente_id == cliente_id]
 
-    # Calculos
     tiempo_total = sum(segundos_de_registro(r) for r in registros)
 
     por_proyecto_dict = {}
@@ -701,10 +624,7 @@ def exportar_informe_pdf(
             continue
         pid = r.proyecto.id
         if pid not in por_proyecto_dict:
-            por_proyecto_dict[pid] = {
-                "nombre": r.proyecto.nombre,
-                "segundos": 0
-            }
+            por_proyecto_dict[pid] = {"nombre": r.proyecto.nombre, "segundos": 0}
         por_proyecto_dict[pid]["segundos"] += segundos_de_registro(r)
 
     por_proyecto = []
@@ -720,11 +640,7 @@ def exportar_informe_pdf(
         proy_nom = r.proyecto.nombre if r.proyecto else "Sin proyecto"
         clave = f"{desc}|{proy_nom}"
         if clave not in actividades_dict:
-            actividades_dict[clave] = {
-                "nombre": desc,
-                "proyecto": proy_nom,
-                "segundos": 0
-            }
+            actividades_dict[clave] = {"nombre": desc, "proyecto": proy_nom, "segundos": 0}
         actividades_dict[clave]["segundos"] += segundos_de_registro(r)
 
     top_actividades = []
@@ -734,40 +650,167 @@ def exportar_informe_pdf(
         a["porcentaje"] = pct
         top_actividades.append(a)
 
-    # Dias trabajados (dias con > 0 segundos)
     dias_set = set()
     for r in registros:
         if r.inicio and segundos_de_registro(r) > 0:
             dias_set.add(r.inicio.date())
     dias_trabajados = len(dias_set)
 
-    # Datos para la plantilla
-    contexto = {
-        "usuario_nombre": f"{usuario_actual.nombre} {usuario_actual.apellido}",
-        "usuario_email": usuario_actual.email,
-        "fecha_desde": fecha_desde.strftime("%d/%m/%Y"),
-        "fecha_hasta": fecha_hasta.strftime("%d/%m/%Y"),
-        "tiempo_total_formateado": formatear_segundos(tiempo_total),
-        "total_actividades": len(top_actividades),
-        "total_proyectos": len(por_proyecto),
-        "dias_trabajados": dias_trabajados,
-        "por_proyecto": por_proyecto,
-        "top_actividades": top_actividades,
-        "fecha_generacion": ahora.strftime("%d/%m/%Y %H:%M:%S"),
-        # Rutas de imagenes
-        "logo_path": ruta_imagen("logo-mg.png"),
-        "iso_path": ruta_imagen("iso.jpg"),
-        "footer_path": ruta_imagen("footer.png"),
-    }
+    # Construir PDF
+    class PDF(FPDF):
+        def header(self):
+            try:
+                logo = ruta_imagen("logo-mg.png")
+                self.image(logo, x=10, y=8, w=45)
+            except Exception:
+                pass
+            try:
+                iso = ruta_imagen("iso.jpg")
+                self.image(iso, x=170, y=8, w=30)
+            except Exception:
+                pass
+            self.set_draw_color(61, 74, 82)
+            self.set_line_width(0.5)
+            self.line(10, 28, 200, 28)
+            self.ln(20)
 
-    # Renderizar plantilla
-    templates_dir = os.path.join(os.path.dirname(__file__), "templates")
-    env = Environment(loader=FileSystemLoader(templates_dir))
-    template = env.get_template("informe_tiempo.html")
-    html_render = template.render(**contexto)
+        def footer(self):
+            try:
+                footer = ruta_imagen("footer.png")
+                self.image(footer, x=0, y=260, w=210)
+            except Exception:
+                pass
+            self.set_y(-20)
+            self.set_font("Helvetica", "I", 7)
+            self.set_text_color(150, 150, 150)
+            self.cell(0, 5, f"Pagina {self.page_no()}", align="C")
 
-    # Convertir a PDF
-    pdf_bytes = HTML(string=html_render).write_pdf()
+    pdf = PDF(orientation="P", unit="mm", format="A4")
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=40)
+
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.set_text_color(61, 74, 82)
+    pdf.cell(0, 8, "INFORME DE TIEMPO", align="C", ln=True)
+    pdf.ln(3)
+
+    # 1. DATOS GENERALES
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_fill_color(238, 241, 243)
+    pdf.set_text_color(42, 52, 58)
+    pdf.cell(0, 7, "1. DATOS GENERALES", fill=True, ln=True)
+    pdf.ln(1)
+
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(50, 50, 50)
+    pdf.cell(35, 6, "Usuario:", border=0)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(60, 6, f"{usuario_actual.nombre} {usuario_actual.apellido}", border=0)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(20, 6, "Periodo:", border=0)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(0, 6, f"{fecha_desde.strftime('%d/%m/%Y')} al {fecha_hasta.strftime('%d/%m/%Y')}", border=0, ln=True)
+
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(35, 6, "Email:", border=0)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(60, 6, usuario_actual.email, border=0)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(20, 6, "Emision:", border=0)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(0, 6, ahora.strftime("%d/%m/%Y %H:%M:%S"), border=0, ln=True)
+    pdf.ln(3)
+
+    # 2. RESUMEN
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_fill_color(238, 241, 243)
+    pdf.set_text_color(42, 52, 58)
+    pdf.cell(0, 7, "2. RESUMEN EJECUTIVO", fill=True, ln=True)
+    pdf.ln(1)
+
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(45, 5, "TIEMPO TOTAL", border=0, align="C")
+    pdf.cell(45, 5, "ACTIVIDADES", border=0, align="C")
+    pdf.cell(45, 5, "PROYECTOS", border=0, align="C")
+    pdf.cell(0, 5, "DIAS TRABAJADOS", border=0, align="C", ln=True)
+
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_text_color(61, 74, 82)
+    pdf.cell(45, 7, formatear_segundos(tiempo_total), border=0, align="C")
+    pdf.cell(45, 7, str(len(top_actividades)), border=0, align="C")
+    pdf.cell(45, 7, str(len(por_proyecto)), border=0, align="C")
+    pdf.cell(0, 7, str(dias_trabajados), border=0, align="C", ln=True)
+    pdf.ln(3)
+
+    # 3. PROYECTOS
+    if por_proyecto:
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_fill_color(238, 241, 243)
+        pdf.set_text_color(42, 52, 58)
+        pdf.cell(0, 7, "3. DISTRIBUCION POR PROYECTO", fill=True, ln=True)
+        pdf.ln(1)
+
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_fill_color(61, 74, 82)
+        pdf.set_text_color(255, 255, 255)
+        pdf.cell(130, 6, "PROYECTO", fill=True, border=0)
+        pdf.cell(30, 6, "DURACION", fill=True, border=0, align="R")
+        pdf.cell(0, 6, "%", fill=True, border=0, align="R", ln=True)
+
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_text_color(50, 50, 50)
+        for i, p in enumerate(por_proyecto):
+            fill = (i % 2 == 0)
+            pdf.set_fill_color(250, 250, 250)
+            pdf.cell(130, 5.5, p["nombre"][:60], fill=fill, border=0)
+            pdf.cell(30, 5.5, p["duracion_formateada"], fill=fill, border=0, align="R")
+            pdf.cell(0, 5.5, f"{p['porcentaje']}%", fill=fill, border=0, align="R", ln=True)
+
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_fill_color(238, 241, 243)
+        pdf.set_text_color(42, 52, 58)
+        pdf.cell(130, 6, "TOTAL", fill=True, border=0)
+        pdf.cell(30, 6, formatear_segundos(tiempo_total), fill=True, border=0, align="R")
+        pdf.cell(0, 6, "100%", fill=True, border=0, align="R", ln=True)
+        pdf.ln(3)
+
+    # 4. ACTIVIDADES
+    if top_actividades:
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_fill_color(238, 241, 243)
+        pdf.set_text_color(42, 52, 58)
+        pdf.cell(0, 7, "4. DETALLE DE ACTIVIDADES", fill=True, ln=True)
+        pdf.ln(1)
+
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_fill_color(61, 74, 82)
+        pdf.set_text_color(255, 255, 255)
+        pdf.cell(90, 6, "ACTIVIDAD", fill=True, border=0)
+        pdf.cell(60, 6, "PROYECTO", fill=True, border=0)
+        pdf.cell(25, 6, "DURACION", fill=True, border=0, align="R")
+        pdf.cell(0, 6, "%", fill=True, border=0, align="R", ln=True)
+
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_text_color(50, 50, 50)
+        for i, a in enumerate(top_actividades):
+            fill = (i % 2 == 0)
+            pdf.set_fill_color(250, 250, 250)
+            pdf.cell(90, 5.5, a["nombre"][:45], fill=fill, border=0)
+            pdf.cell(60, 5.5, a["proyecto"][:30], fill=fill, border=0)
+            pdf.cell(25, 5.5, a["duracion_formateada"], fill=fill, border=0, align="R")
+            pdf.cell(0, 5.5, f"{a['porcentaje']}%", fill=fill, border=0, align="R", ln=True)
+
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_fill_color(238, 241, 243)
+        pdf.set_text_color(42, 52, 58)
+        pdf.cell(150, 6, "TOTAL", fill=True, border=0)
+        pdf.cell(25, 6, formatear_segundos(tiempo_total), fill=True, border=0, align="R")
+        pdf.cell(0, 6, "100%", fill=True, border=0, align="R", ln=True)
+
+    pdf_bytes = pdf.output(dest="S")
+    if isinstance(pdf_bytes, str):
+        pdf_bytes = pdf_bytes.encode("latin-1")
 
     nombre_archivo = f"informe_tiempo_{fecha_desde}_{fecha_hasta}.pdf"
 
