@@ -1,8 +1,6 @@
 import secrets
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
-
-TZ_PERU = ZoneInfo("America/Lima")
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -20,6 +18,9 @@ router = APIRouter(
     prefix="/rastreador",
     tags=["Rastreador"]
 )
+
+
+TZ_PERU = ZoneInfo("America/Lima")
 
 
 ESTADOS = {
@@ -83,7 +84,6 @@ def crear_tarea(
             detail="Prioridad inválida"
         )
 
-    # Validar que el proyecto exista y no esté archivado
     proyecto = (
         db.query(Proyecto)
         .filter(Proyecto.id == datos.proyecto_id)
@@ -100,14 +100,12 @@ def crear_tarea(
             detail="No se puede asignar un proyecto archivado"
         )
 
-    # Separar campos de la tarea de la lista de etiquetas
     datos_dict = datos.model_dump(exclude={"etiqueta_ids"})
     tarea = Tarea(
         usuario_id=usuario.id,
         **datos_dict
     )
 
-    # Asociar etiquetas si las mandaron en el JSON
     if datos.etiqueta_ids:
         etiquetas = (
             db.query(Etiqueta)
@@ -152,7 +150,6 @@ def listar_tareas(
             Tarea.estado == estado
         )
 
-    # Filtro opcional por proyecto
     if proyecto_id is not None:
         query = query.filter(
             Tarea.proyecto_id == proyecto_id
@@ -177,7 +174,6 @@ def obtener_tarea(
     db: Session = Depends(get_db),
     usuario=Depends(get_usuario_actual)
 ):
-    """Devuelve el detalle de una tarea puntual con sus etiquetas y proyecto."""
     return obtener_tarea_o_404(
         db,
         tarea_id,
@@ -220,7 +216,6 @@ def actualizar_tarea(
                 detail="Prioridad inválida"
             )
 
-    # Validar proyecto solo si el usuario lo envió para cambiarlo
     if "proyecto_id" in cambios and cambios["proyecto_id"] is not None:
         proyecto = (
             db.query(Proyecto)
@@ -238,7 +233,6 @@ def actualizar_tarea(
                 detail="No se puede asignar un proyecto archivado"
             )
 
-    # Actualizar etiquetas si mandaron la lista
     if "etiqueta_ids" in cambios:
         ids_etiquetas = cambios.pop("etiqueta_ids")
         if ids_etiquetas is not None:
@@ -403,20 +397,9 @@ def resumen(
 
     total = len(tareas)
 
-    completadas = sum(
-        t.estado == "COMPLETADA"
-        for t in tareas
-    )
-
-    en_progreso = sum(
-        t.estado == "EN_PROGRESO"
-        for t in tareas
-    )
-
-    pendientes = sum(
-        t.estado == "PENDIENTE"
-        for t in tareas
-    )
+    completadas = sum(t.estado == "COMPLETADA" for t in tareas)
+    en_progreso = sum(t.estado == "EN_PROGRESO" for t in tareas)
+    pendientes = sum(t.estado == "PENDIENTE" for t in tareas)
 
     vencidas = sum(
         t.estado != "COMPLETADA"
@@ -455,9 +438,7 @@ def crear_enlace(
     usuario=Depends(get_usuario_actual)
 ):
 
-    enlace = db.query(
-        EnlaceRastreador
-    ).filter(
+    enlace = db.query(EnlaceRastreador).filter(
         EnlaceRastreador.usuario_id == usuario.id,
         EnlaceRastreador.activo == True
     ).first()
@@ -493,17 +474,13 @@ def desactivar_enlace(
     usuario=Depends(get_usuario_actual)
 ):
 
-    enlace = db.query(
-        EnlaceRastreador
-    ).filter(
+    enlace = db.query(EnlaceRastreador).filter(
         EnlaceRastreador.usuario_id == usuario.id,
         EnlaceRastreador.activo == True
     ).first()
 
     if enlace:
-
         enlace.activo = False
-
         db.commit()
 
     return None
@@ -522,36 +499,28 @@ def consultar_rastreador_publico(
     db: Session = Depends(get_db)
 ):
 
-    enlace = db.query(
-        EnlaceRastreador
-    ).filter(
+    enlace = db.query(EnlaceRastreador).filter(
         EnlaceRastreador.token == token,
         EnlaceRastreador.activo == True
     ).first()
 
     if not enlace:
-
         raise HTTPException(
             status_code=404,
             detail="Enlace no válido o desactivado"
         )
 
-    usuario = db.query(
-        Usuario
-    ).filter(
+    usuario = db.query(Usuario).filter(
         Usuario.id == enlace.usuario_id
     ).first()
 
     if not usuario:
-
         raise HTTPException(
             status_code=404,
             detail="Usuario no encontrado"
         )
 
-    tareas = db.query(
-        Tarea
-    ).filter(
+    tareas = db.query(Tarea).filter(
         Tarea.usuario_id == enlace.usuario_id
     ).order_by(
         Tarea.fecha_limite.is_(None),
@@ -561,20 +530,9 @@ def consultar_rastreador_publico(
 
     total = len(tareas)
 
-    completadas = sum(
-        t.estado == "COMPLETADA"
-        for t in tareas
-    )
-
-    pendientes = sum(
-        t.estado == "PENDIENTE"
-        for t in tareas
-    )
-
-    en_progreso = sum(
-        t.estado == "EN_PROGRESO"
-        for t in tareas
-    )
+    completadas = sum(t.estado == "COMPLETADA" for t in tareas)
+    pendientes = sum(t.estado == "PENDIENTE" for t in tareas)
+    en_progreso = sum(t.estado == "EN_PROGRESO" for t in tareas)
 
     vencidas = sum(
         t.estado != "COMPLETADA"
@@ -601,7 +559,6 @@ def consultar_rastreador_publico(
     }
 
 
-
 # ============================================================
 # TEMPORIZADOR: INICIAR SESIÓN (START)
 # ============================================================
@@ -616,7 +573,32 @@ def iniciar_temporizador(
     db: Session = Depends(get_db),
     usuario=Depends(get_usuario_actual)
 ):
-    # Validar que no tenga ya un temporizador corriendo
+    ahora = datetime.now(TZ_PERU)
+
+    # Cerrar registros huérfanos (>4 horas)
+    limite_huerfano = ahora - timedelta(hours=4)
+
+    huerfanos = (
+        db.query(TiempoRegistro)
+        .filter(
+            TiempoRegistro.usuario_id == usuario.id,
+            TiempoRegistro.fin.is_(None),
+            TiempoRegistro.inicio < limite_huerfano
+        )
+        .all()
+    )
+
+    for h in huerfanos:
+        inicio_h = h.inicio
+        if inicio_h.tzinfo is None:
+            inicio_h = inicio_h.replace(tzinfo=TZ_PERU)
+
+        h.fin = inicio_h + timedelta(seconds=1)
+        h.duracion_segundos = 1
+
+    if huerfanos:
+        db.commit()
+
     activo = (
         db.query(TiempoRegistro)
         .filter(
@@ -628,27 +610,19 @@ def iniciar_temporizador(
     if activo:
         raise HTTPException(
             status_code=400,
-            detail="Ya tienes un temporizador activo en curso. Detenlo antes de iniciar otro."
+            detail="Ya tienes un temporizador activo en curso. Deténlo antes de iniciar otro."
         )
 
-    # Validar que el proyecto exista y esté activo
     proyecto = (
         db.query(Proyecto)
         .filter(Proyecto.id == datos.proyecto_id)
         .first()
     )
     if not proyecto:
-        raise HTTPException(
-            status_code=404,
-            detail="Proyecto no encontrado"
-        )
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     if proyecto.archivado:
-        raise HTTPException(
-            status_code=400,
-            detail="No se puede cronometrar sobre un proyecto archivado"
-        )
+        raise HTTPException(status_code=400, detail="No se puede cronometrar sobre un proyecto archivado")
 
-    # Si mandaron tarea, validar existencia y pertenencia al proyecto
     if datos.tarea_id is not None:
         tarea = (
             db.query(Tarea)
@@ -656,22 +630,16 @@ def iniciar_temporizador(
             .first()
         )
         if not tarea:
-            raise HTTPException(
-                status_code=404,
-                detail="Tarea no encontrada"
-            )
+            raise HTTPException(status_code=404, detail="Tarea no encontrada")
         if tarea.proyecto_id != datos.proyecto_id:
-            raise HTTPException(
-                status_code=400,
-                detail="La tarea seleccionada no pertenece al proyecto indicado"
-            )
+            raise HTTPException(status_code=400, detail="La tarea seleccionada no pertenece al proyecto indicado")
 
     nuevo_registro = TiempoRegistro(
         usuario_id=usuario.id,
         proyecto_id=datos.proyecto_id,
         tarea_id=datos.tarea_id,
         descripcion=datos.descripcion,
-        inicio=datetime.now(TZ_PERU),
+        inicio=ahora,
         fin=None,
         duracion_segundos=0
     )
@@ -702,17 +670,36 @@ def detener_temporizador(
         )
         .first()
     )
+
     if not registro:
-        raise HTTPException(
-            status_code=404,
-            detail="No hay ningún temporizador activo para detener"
-        )
+        ahora = datetime.now(TZ_PERU)
+        return {
+            "id": 0,
+            "proyecto_id": 0,
+            "nombre_proyecto": None,
+            "color_proyecto": None,
+            "tarea_id": None,
+            "titulo_tarea": None,
+            "descripcion": "Sin temporizador activo",
+            "inicio": ahora,
+            "fin": ahora,
+            "duracion_segundos": 0
+        }
 
     ahora = datetime.now(TZ_PERU)
-    segundos_transcurridos = int((ahora - registro.inicio).total_seconds())
+
+    if registro.inicio.tzinfo is None:
+        inicio_aware = registro.inicio.replace(tzinfo=TZ_PERU)
+    else:
+        inicio_aware = registro.inicio
+
+    segundos_transcurridos = int((ahora - inicio_aware).total_seconds())
+
+    if segundos_transcurridos < 0:
+        segundos_transcurridos = 0
 
     registro.fin = ahora
-    registro.duracion_segundos = max(segundos_transcurridos, 0)
+    registro.duracion_segundos = segundos_transcurridos
 
     db.commit()
     db.refresh(registro)
@@ -731,7 +718,6 @@ def obtener_temporizador_activo(
     db: Session = Depends(get_db),
     usuario=Depends(get_usuario_actual)
 ):
-    """Devuelve el registro en curso para que el frontend reanude el cronómetro."""
     return (
         db.query(TiempoRegistro)
         .filter(
@@ -740,6 +726,8 @@ def obtener_temporizador_activo(
         )
         .first()
     )
+
+
 # ============================================================
 # HISTORIAL DE TIEMPOS
 # ============================================================
@@ -755,10 +743,6 @@ def historial_tiempos(
     db: Session = Depends(get_db),
     usuario=Depends(get_usuario_actual)
 ):
-    """
-    Lista las sesiones de tiempo cerradas
-    del usuario actual.
-    """
 
     if fecha_desde and fecha_hasta:
         if fecha_desde > fecha_hasta:
@@ -772,13 +756,11 @@ def historial_tiempos(
         TiempoRegistro.fin.is_not(None)
     )
 
-    # Filtro por proyecto
     if proyecto_id is not None:
         query = query.filter(
             TiempoRegistro.proyecto_id == proyecto_id
         )
 
-    # Filtro desde fecha
     if fecha_desde is not None:
         query = query.filter(
             TiempoRegistro.inicio >= datetime.combine(
@@ -788,7 +770,6 @@ def historial_tiempos(
             )
         )
 
-    # Filtro hasta fecha
     if fecha_hasta is not None:
         query = query.filter(
             TiempoRegistro.inicio <= datetime.combine(
@@ -816,9 +797,6 @@ def eliminar_registro_tiempo(
     db: Session = Depends(get_db),
     usuario=Depends(get_usuario_actual)
 ):
-    """
-    Elimina una entrada de tiempo del usuario actual.
-    """
 
     registro = db.query(TiempoRegistro).filter(
         TiempoRegistro.id == registro_id,
@@ -831,7 +809,6 @@ def eliminar_registro_tiempo(
             detail="Registro de tiempo no encontrado"
         )
 
-    # No permitir eliminar un temporizador activo
     if registro.fin is None:
         raise HTTPException(
             status_code=400,

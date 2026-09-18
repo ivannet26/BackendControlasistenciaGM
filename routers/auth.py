@@ -38,7 +38,7 @@ def registro(datos: schemas.UsuarioRegistro, db: Session = Depends(get_db)):
         nombre=datos.nombre,
         apellido=datos.apellido,
         email=datos.email,
-        password_hash=hash_password(datos.password),
+        password_hash=datos.password,
         rol="PRACTICANTE",
         activo=True
     )

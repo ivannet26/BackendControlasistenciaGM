@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<style>
+  @page {
+    size: A4;
+    margin: 1.2cm 1cm 3cm 1cm;
+    @bottom-center {
+      content: "Página " counter(page) " de " counter(pages);
+      font-size: 8px;
+      color: #888;
+      margin-bottom: 4px;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    font-family: Helvetica, Arial, sans-serif;
+    font-size: 9.5px;
+    color: #333;
+    margin: 0;
+    padding: 0;
+    line-height: 1.35;
+  }
+
+  /* HEADER */
+  .header {
+    width: 100%;
+    border-bottom: 2px solid #3d4a52;
+    padding-bottom: 8px;
+    margin-bottom: 14px;
+  }
+
+  .header table { width: 100%; border-collapse: collapse; }
+
+  .header .logo-cell img {
+    height: 55px;
+    width: auto;
+  }
+
+  .header .iso-cell { text-align: right; }
+
+  .header .iso-cell img {
+    height: 42px;
+    width: auto;
+  }
+
+  /* TITULO */
+  .titulo-informe {
+    text-align: center;
+    margin: 0 0 16px 0;
+    padding: 8px 0;
+    border-top: 1px solid #ddd;
+    border-bottom: 1px solid #ddd;
+  }
+
+  .titulo-informe h1 {
+    font-size: 14px;
+    color: #3d4a52;
+    margin: 0;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  /* SECCIONES */
+  .seccion-titulo {
+    font-size: 10px;
+    font-weight: bold;
+    color: #2a343a;
+    background: #eef1f3;
+    border-left: 4px solid #3d4a52;
+    padding: 6px 10px;
+    margin: 14px 0 8px 0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* TABLA INFO */
+  table.info {
+    width: 100%;
+    border-collapse: collapse;
+    border: 1px solid #d5d5d5;
+  }
+
+  table.info td {
+    padding: 7px 12px;
+    font-size: 9.5px;
+    border-bottom: 1px solid #eee;
+  }
+
+  table.info tr:last-child td { border-bottom: none; }
+
+  table.info td.label {
+    background: #f7f7f7;
+    color: #555;
+    width: 130px;
+    font-weight: bold;
+    border-right: 1px solid #d5d5d5;
+  }
+
+  /* RESUMEN */
+  .resumen-linea {
+    display: table;
+    width: 100%;
+    border-collapse: collapse;
+    border: 1px solid #d5d5d5;
+  }
+
+  .resumen-linea .item {
+    display: table-cell;
+    padding: 12px 8px;
+    text-align: center;
+    border-right: 1px solid #d5d5d5;
+    width: 25%;
+    background: #fafbfb;
+  }
+
+  .resumen-linea .item:last-child { border-right: none; }
+
+  .resumen-linea .label {
+    color: #666;
+    font-size: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+  }
+
+  .resumen-linea .valor {
+    font-size: 13px;
+    font-weight: bold;
+    color: #3d4a52;
+  }
+
+  /* TABLAS DE DATOS */
+  table.data {
+    width: 100%;
+    border-collapse: collapse;
+    border: 1px solid #d5d5d5;
+  }
+
+  table.data thead th {
+    background: #3d4a52;
+    color: white;
+    padding: 7px 10px;
+    text-align: left;
+    font-size: 8.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-right: 1px solid #2f3a41;
+  }
+
+  table.data thead th:last-child { border-right: none; }
+
+  table.data tbody td {
+    padding: 6px 10px;
+    border-bottom: 1px solid #eee;
+    font-size: 9px;
+    color: #333;
+  }
+
+  table.data tbody tr:nth-child(even) { background: #fafafa; }
+
+  table.data tfoot td {
+    background: #eef1f3;
+    color: #2a343a;
+    font-weight: bold;
+    padding: 7px 10px;
+    font-size: 9.5px;
+    border-top: 2px solid #3d4a52;
+  }
+
+  .text-right { text-align: right; }
+
+  /* FOOTER */
+  .footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    text-align: center;
+  }
+
+  .footer img {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+</style>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <div class="header">
+    <table>
+      <tr>
+        <td class="logo-cell">
+          <img src="{{ logo_path }}" alt="Logo">
+        </td>
+        <td class="iso-cell">
+          <img src="{{ iso_path }}" alt="ISO">
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- TITULO -->
+  <div class="titulo-informe">
+    <h1>INFORME SEMANAL</h1>
+  </div>
+
+  <!-- 1. DATOS GENERALES -->
+  <div class="seccion-titulo">1. Datos generales</div>
+  <table class="info">
+    <tr>
+      <td class="label">Usuario</td>
+      <td>{{ usuario_nombre }}</td>
+      <td class="label">Período</td>
+      <td>{{ fecha_desde }} al {{ fecha_hasta }}</td>
+    </tr>
+    <tr>
+      <td class="label">Email</td>
+      <td>{{ usuario_email }}</td>
+      <td class="label">Emisión</td>
+      <td>{{ fecha_generacion }}</td>
+    </tr>
+  </table>
+
+  <!-- 2. RESUMEN -->
+  <div class="seccion-titulo">2. Resumen ejecutivo</div>
+  <div class="resumen-linea">
+    <div class="item">
+      <div class="label">Tiempo total</div>
+      <div class="valor">{{ tiempo_total_formateado }}</div>
+    </div>
+    <div class="item">
+      <div class="label">Actividades</div>
+      <div class="valor">{{ total_actividades }}</div>
+    </div>
+    <div class="item">
+      <div class="label">Proyectos</div>
+      <div class="valor">{{ total_proyectos }}</div>
+    </div>
+    <div class="item">
+      <div class="label">Días trabajados</div>
+      <div class="valor">{{ dias_trabajados }}</div>
+    </div>
+  </div>
+
+  <!-- 3. PROYECTOS -->
+  {% if por_proyecto %}
+  <div class="seccion-titulo">3. Distribución por proyecto</div>
+  <table class="data">
+    <thead>
+      <tr>
+        <th>Proyecto</th>
+        <th class="text-right" style="width: 20%;">Duración</th>
+        <th class="text-right" style="width: 12%;">%</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in por_proyecto %}
+      <tr>
+        <td>{{ p.nombre }}</td>
+        <td class="text-right">{{ p.duracion_formateada }}</td>
+        <td class="text-right">{{ p.porcentaje }}%</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td>TOTAL</td>
+        <td class="text-right">{{ tiempo_total_formateado }}</td>
+        <td class="text-right">100%</td>
+      </tr>
+    </tfoot>
+  </table>
+  {% endif %}
+
+  <!-- 4. ACTIVIDADES -->
+  {% if top_actividades %}
+  <div class="seccion-titulo">4. Detalle de actividades</div>
+  <table class="data">
+    <thead>
+      <tr>
+        <th style="width: 45%;">Actividad</th>
+        <th style="width: 28%;">Proyecto</th>
+        <th class="text-right" style="width: 15%;">Duración</th>
+        <th class="text-right" style="width: 12%;">%</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in top_actividades %}
+      <tr>
+        <td>{{ a.nombre }}</td>
+        <td>{{ a.proyecto }}</td>
+        <td class="text-right">{{ a.duracion_formateada }}</td>
+        <td class="text-right">{{ a.porcentaje }}%</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="2">TOTAL</td>
+        <td class="text-right">{{ tiempo_total_formateado }}</td>
+        <td class="text-right">100%</td>
+      </tr>
+    </tfoot>
+  </table>
+  {% endif %}
+
+  <!-- FOOTER -->
+  <div class="footer">
+    <img src="{{ footer_path }}" alt="Footer">
+  </div>
+
+</body>
+</html>

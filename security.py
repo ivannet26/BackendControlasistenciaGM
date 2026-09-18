@@ -1,4 +1,3 @@
-import bcrypt
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from fastapi import Depends, HTTPException, status
@@ -21,22 +20,32 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 480
 security = HTTPBearer()
 
 
+# ============================================================
+# ⚠️ SIN HASHEO - SOLO PARA DESARROLLO
+# Las contraseñas se guardan y verifican en TEXTO PLANO
+# NO usar en producción con usuarios reales
+# ============================================================
+
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(
-        password.encode("utf-8"),
-        bcrypt.gensalt()
-    ).decode("utf-8")
+    """
+    ⚠️ SIN HASHEO - Devuelve la contraseña en texto plano.
+    """
+    return password
 
 
 def verificar_password(
     plain_password: str,
     hashed_password: str
 ) -> bool:
-    return bcrypt.checkpw(
-        plain_password.encode("utf-8"),
-        hashed_password.encode("utf-8")
-    )
+    """
+    ⚠️ SIN HASHEO - Compara texto plano con texto plano.
+    """
+    return plain_password == hashed_password
 
+
+# ============================================================
+# JWT
+# ============================================================
 
 def crear_token(
     data: dict,
