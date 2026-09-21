@@ -128,7 +128,8 @@ def obtener_resumen_panel(
         "equipo": {
             "total": total_miembros,
             "activos": miembros_activos,
-            "inactivos": miembros_inactivos
+            "inactivos": miembros_inactivos,
+            
         },
         "etiquetas": {
             "total": total_etiquetas,
@@ -501,6 +502,7 @@ def obtener_actividad_equipo(
             "color_avatar": color_avatar,
             "email": u.email,
             "rol": u.rol,
+            "activo": u.activo,  
             "ultima_actividad": ultima_actividad,
             "ultimo_proyecto": ultimo_proyecto,
             "hora": hora_formateada,

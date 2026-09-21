@@ -10,7 +10,11 @@ from equipo_schemas import (
     MiembroCrear, MiembroEditar, MiembroOut,
 )
 from security import get_usuario_actual
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from rastreador_models import TiempoRegistro
 
+TZ_PERU = ZoneInfo("America/Lima")
 router = APIRouter(prefix="/equipo", tags=["Equipo"])
 
 
@@ -475,3 +479,121 @@ def desasignar_etiqueta_de_miembro(
     db.commit()
     db.refresh(miembro)
     return _construir_miembro_out(miembro)
+# ════════════════════════════════════════════════════════════════════════════════
+# DESLOGEO / BLOQUEO FORZADO POR ADMIN
+# ════════════════════════════════════════════════════════════════════════════════
+
+@router.post("/miembros/{usuario_id}/deslogear", status_code=status.HTTP_200_OK)
+def deslogear_usuario(
+    usuario_id: int,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_usuario_actual),
+):
+    """
+    Fuerza el cierre de sesión de un usuario:
+    - Marca la cuenta como inactiva (activo = False)
+    - Cierra todos los registros de tiempo ABIERTOS (fin = None)
+    """
+    verificar_es_admin(
+        db,
+        usuario_actual,
+        mensaje_error="Solo un usuario con tipo ADMINISTRACION puede deslogear a otros usuarios"
+    )
+
+    if usuario_id == usuario_actual.id:
+        raise HTTPException(
+            status_code=400,
+            detail="No puedes deslogearte a ti mismo desde aquí."
+        )
+
+    usuario_objetivo = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+    if not usuario_objetivo:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    # 1. Desactivar la cuenta
+    usuario_objetivo.activo = False
+
+    # 2. Cerrar todos los TiempoRegistro abiertos
+    ahora = datetime.now(TZ_PERU)
+
+    registros_abiertos = (
+        db.query(TiempoRegistro)
+        .filter(
+            TiempoRegistro.usuario_id == usuario_id,
+            TiempoRegistro.fin.is_(None)
+        )
+        .all()
+    )
+
+    for r in registros_abiertos:
+        if r.inicio:
+            inicio = r.inicio
+            if inicio.tzinfo is None:
+                inicio = inicio.replace(tzinfo=TZ_PERU)
+
+            r.fin = ahora
+            r.duracion_segundos = max(
+                int((ahora - inicio).total_seconds()),
+                0
+            )
+
+    db.commit()
+
+    return {
+        "ok": True,
+        "mensaje": f"{usuario_objetivo.nombre} {usuario_objetivo.apellido} ha sido desconectado",
+        "registros_cerrados": len(registros_abiertos)
+    }
+
+
+@router.post("/miembros/{usuario_id}/reactivar", status_code=status.HTTP_200_OK)
+def reactivar_usuario(
+    usuario_id: int,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_usuario_actual),
+):
+    """
+    Reactiva la cuenta de un usuario previamente desconectado.
+    Solo ADMINISTRACION / ADMINISTRADOR / ADMIN puede hacerlo.
+    """
+    verificar_es_admin(
+        db,
+        usuario_actual,
+        mensaje_error="Solo un usuario con tipo ADMINISTRACION puede reactivar usuarios"
+    )
+
+    usuario_objetivo = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+    if not usuario_objetivo:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    usuario_objetivo.activo = True
+    db.commit()
+
+    return {
+        "ok": True,
+        "mensaje": f"El usuario {usuario_objetivo.nombre} {usuario_objetivo.apellido} ha sido reactivado"
+    }
+@router.post("/miembros/{usuario_id}/reactivar", status_code=status.HTTP_200_OK)
+def reactivar_usuario(
+    usuario_id: int,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_usuario_actual),
+):
+    """Reactiva la cuenta de un usuario previamente desconectado."""
+    verificar_es_admin(
+        db,
+        usuario_actual,
+        mensaje_error="Solo ADMINISTRACION puede reactivar usuarios"
+    )
+
+    usuario_objetivo = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+    if not usuario_objetivo:
+        raise HTTPException(404, "Usuario no encontrado")
+
+    usuario_objetivo.activo = True
+    db.commit()
+
+    return {
+        "ok": True,
+        "mensaje": f"{usuario_objetivo.nombre} {usuario_objetivo.apellido} ha sido reactivado"
+    }
