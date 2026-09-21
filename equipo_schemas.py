@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from datetime import datetime
 from typing import Optional, List
 
@@ -39,7 +39,7 @@ class EtiquetaOut(BaseModel):
         from_attributes = True
 
 class MiembroCrear(BaseModel):
-    usuario_id: int
+    email: EmailStr
     grupo_id: Optional[int] = None
     tipo_usuario: str = "MIEMBRO"
     estado: str = "ACTIVO"

@@ -41,6 +41,15 @@ class EtiquetaSimple(BaseModel):
     color: Optional[str]
     class Config:
         from_attributes = True
+
+
+class MiembroSimpleOut(BaseModel):
+    id: int
+    nombre: str
+    apellido: str
+    email: str
+    class Config:
+        from_attributes = True
     
 
 # ============================================================
@@ -108,6 +117,8 @@ class TareaOut(BaseModel):
     color_proyecto: Optional[str] = None
 
     etiquetas: List[EtiquetaSimple] = []
+
+    miembros: List[MiembroSimpleOut] = []
 
     class Config:
         

@@ -9,6 +9,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Table,
     Text,
     Numeric
 )
@@ -17,6 +18,28 @@ from database import Base
 
 
 TZ_PERU = ZoneInfo("America/Lima")
+
+
+# ============================================================
+# TABLA INTERMEDIA: TAREA <-> MIEMBRO_EQUIPO (muchos a muchos)
+# ============================================================
+
+tarea_miembro = Table(
+    "tarea_miembro",
+    Base.metadata,
+    Column(
+        "tarea_id",
+        Integer,
+        ForeignKey("rastreador_tareas.id", ondelete="CASCADE"),
+        primary_key=True
+    ),
+    Column(
+        "miembro_id",
+        Integer,
+        ForeignKey("miembros_equipo.id", ondelete="CASCADE"),
+        primary_key=True
+    )
+)
 
 
 class Tarea(Base):
@@ -112,6 +135,16 @@ class Tarea(Base):
     etiquetas = relationship(
         "Etiqueta",
         secondary="tarea_etiqueta",
+        back_populates="tareas",
+    )
+
+    # ========================================================
+    # RELACIÓN MUCHOS A MUCHOS CON MIEMBROS DEL EQUIPO
+    # ========================================================
+
+    miembros = relationship(
+        "MiembroEquipo",
+        secondary="tarea_miembro",
         back_populates="tareas",
     )
 

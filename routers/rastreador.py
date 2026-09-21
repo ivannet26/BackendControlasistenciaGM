@@ -1,7 +1,7 @@
 import secrets
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
-
+from equipo_models import Etiqueta, MiembroEquipo
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -377,7 +377,92 @@ def desasignar_etiqueta_de_tarea(
 
     return tarea
 
+# ============================================================
+# MIEMBROS DE TAREAS
+# ============================================================
 
+@router.post(
+    "/tareas/{tarea_id}/miembros/{miembro_id}",
+    response_model=schemas.TareaOut,
+    status_code=status.HTTP_200_OK
+)
+def asignar_miembro_a_tarea(
+    tarea_id: int,
+    miembro_id: int,
+    db: Session = Depends(get_db),
+    usuario=Depends(get_usuario_actual)
+):
+
+    tarea = obtener_tarea_o_404(
+        db,
+        tarea_id,
+        usuario.id
+    )
+
+    miembro = db.query(MiembroEquipo).filter(
+        MiembroEquipo.id == miembro_id
+    ).first()
+
+    if not miembro:
+        raise HTTPException(
+            status_code=404,
+            detail="Miembro no encontrado"
+        )
+
+    if miembro in tarea.miembros:
+        raise HTTPException(
+            status_code=400,
+            detail="El miembro ya está asignado a esta tarea"
+        )
+
+    tarea.miembros.append(miembro)
+
+    db.commit()
+    db.refresh(tarea)
+
+    return tarea
+
+
+@router.delete(
+    "/tareas/{tarea_id}/miembros/{miembro_id}",
+    response_model=schemas.TareaOut,
+    status_code=status.HTTP_200_OK
+)
+def desasignar_miembro_de_tarea(
+    tarea_id: int,
+    miembro_id: int,
+    db: Session = Depends(get_db),
+    usuario=Depends(get_usuario_actual)
+):
+
+    tarea = obtener_tarea_o_404(
+        db,
+        tarea_id,
+        usuario.id
+    )
+
+    miembro = db.query(MiembroEquipo).filter(
+        MiembroEquipo.id == miembro_id
+    ).first()
+
+    if not miembro:
+        raise HTTPException(
+            status_code=404,
+            detail="Miembro no encontrado"
+        )
+
+    if miembro not in tarea.miembros:
+        raise HTTPException(
+            status_code=400,
+            detail="El miembro no está asignado a esta tarea"
+        )
+
+    tarea.miembros.remove(miembro)
+
+    db.commit()
+    db.refresh(tarea)
+
+    return tarea
 # ============================================================
 # RESUMEN DEL RASTREADOR
 # ============================================================

@@ -19,6 +19,7 @@ miembro_etiqueta = Table(
     Column("etiqueta_id", Integer, ForeignKey("etiquetas.id", ondelete="CASCADE"), primary_key=True),
 )
 
+
 class Grupo(Base):
     __tablename__ = "grupos"
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -26,6 +27,7 @@ class Grupo(Base):
     descripcion = Column(String(255), nullable=True)
     creado_en = Column(DateTime(timezone=True), server_default=func.now())
     miembros = relationship("MiembroEquipo", back_populates="grupo")
+
 
 class Etiqueta(Base):
     __tablename__ = "etiquetas"
@@ -37,6 +39,7 @@ class Etiqueta(Base):
     miembros = relationship("MiembroEquipo", secondary="miembro_etiqueta", back_populates="etiquetas")
     tareas = relationship("Tarea", secondary="tarea_etiqueta", back_populates="etiquetas")
 
+
 class MiembroEquipo(Base):
     __tablename__ = "miembros_equipo"
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -47,6 +50,33 @@ class MiembroEquipo(Base):
     clave_temp = Column(String(255), nullable=True)
     creado_en = Column(DateTime(timezone=True), server_default=func.now())
     actualizado_en = Column(DateTime(timezone=True), onupdate=func.now())
+
     grupo = relationship("Grupo", back_populates="miembros")
     usuario = relationship("Usuario", foreign_keys=[usuario_id])
     etiquetas = relationship("Etiqueta", secondary="miembro_etiqueta", back_populates="miembros")
+
+    # ========================================================
+    # RELACIÓN MUCHOS A MUCHOS CON TAREAS
+    # ========================================================
+
+    tareas = relationship(
+        "Tarea",
+        secondary="tarea_miembro",
+        back_populates="miembros",
+    )
+
+    # ========================================================
+    # PROPIEDADES: exponen nombre/apellido/email del usuario
+    # ========================================================
+
+    @property
+    def nombre(self) -> str | None:
+        return self.usuario.nombre if self.usuario else None
+
+    @property
+    def apellido(self) -> str | None:
+        return self.usuario.apellido if self.usuario else None
+
+    @property
+    def email(self) -> str | None:
+        return self.usuario.email if self.usuario else None

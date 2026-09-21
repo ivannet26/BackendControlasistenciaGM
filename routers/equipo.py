@@ -292,21 +292,28 @@ def agregar_miembro(
         mensaje_error="Solo un usuario con tipo ADMINISTRACION puede agregar miembros al equipo"
     )
 
-    # Verificar que el usuario exista
-    usuario = db.query(Usuario).filter(Usuario.id == datos.usuario_id).first()
+       # Verificar que el usuario exista (búsqueda por email)
+    usuario = (
+        db.query(Usuario)
+        .filter(Usuario.email == datos.email.lower())
+        .first()
+    )
     if not usuario:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        raise HTTPException(
+            status_code=404,
+            detail="No existe ningún usuario registrado con ese correo",
+        )
 
     # Verificar que el usuario no esté ya en el equipo
     ya_existe = (
         db.query(MiembroEquipo)
-        .filter(MiembroEquipo.usuario_id == datos.usuario_id)
+        .filter(MiembroEquipo.usuario_id == usuario.id)
         .first()
     )
     if ya_existe:
         raise HTTPException(
             status_code=400,
-            detail="El usuario ya es miembro del equipo",
+            detail="Ese usuario ya es miembro del equipo",
         )
 
     # Verificar que el grupo exista si se proporcionó
@@ -316,7 +323,7 @@ def agregar_miembro(
             raise HTTPException(status_code=404, detail="Grupo no encontrado")
 
     miembro = MiembroEquipo(
-        usuario_id=datos.usuario_id,
+        usuario_id=usuario.id,
         grupo_id=datos.grupo_id,
         tipo_usuario=datos.tipo_usuario.upper(),
         estado=datos.estado.upper(),
@@ -324,7 +331,7 @@ def agregar_miembro(
     )
     db.add(miembro)
 
-    # 🔄 SINCRONIZAR ROL AL CREAR con mapeo
+    #  SINCRONIZAR ROL AL CREAR con mapeo
     usuario.rol = convertir_a_rol_global(datos.tipo_usuario)
 
     db.commit()
