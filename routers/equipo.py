@@ -27,6 +27,29 @@ ROLES_ADMIN = {"ADMINISTRACION", "ADMINISTRADOR", "ADMIN"}
 
 
 # ════════════════════════════════════════════════════════════════════════════════
+# MAPEO DE ROLES: tipo_usuario (equipo) → rol (usuariosPrueba)
+# ════════════════════════════════════════════════════════════════════════════════
+
+MAPEO_ROL_GLOBAL = {
+    "ADMINISTRACION": "ADMINISTRADOR",
+    "MIEMBRO": "PRACTICANTE",
+}
+
+
+def convertir_a_rol_global(tipo_usuario: str) -> str:
+    """
+    Convierte el tipo_usuario del equipo al rol global de usuariosPrueba.
+    - ADMINISTRACION → ADMINISTRADOR
+    - MIEMBRO → PRACTICANTE
+    - Otros → tal cual
+    """
+    if not tipo_usuario:
+        return tipo_usuario
+    tipo_upper = tipo_usuario.upper()
+    return MAPEO_ROL_GLOBAL.get(tipo_upper, tipo_upper)
+
+
+# ════════════════════════════════════════════════════════════════════════════════
 # FUNCIÓN AUXILIAR PARA VALIDAR ADMIN
 # ════════════════════════════════════════════════════════════════════════════════
 
@@ -61,11 +84,7 @@ def verificar_es_admin(
     if not (es_admin_global or es_admin_equipo):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                f"{mensaje_error}. "
-                f"Tu rol global es '{rol_global or 'SIN ROL'}' "
-                f"y tu tipo de equipo es '{tipo_equipo or 'NO ESTÁS EN EL EQUIPO'}'"
-            ),
+            detail="Solo un usuario con rol de administrador puede realizar esta acción",
         )
 
 
@@ -304,6 +323,10 @@ def agregar_miembro(
         clave_temp=datos.clave_temp,
     )
     db.add(miembro)
+
+    # 🔄 SINCRONIZAR ROL AL CREAR con mapeo
+    usuario.rol = convertir_a_rol_global(datos.tipo_usuario)
+
     db.commit()
     db.refresh(miembro)
     return _construir_miembro_out(miembro)
@@ -319,9 +342,11 @@ def editar_miembro(
     """
     Edita grupo, tipo_usuario, estado o clave_temp de un miembro.
 
-    Regla de permisos:
-    - Cambiar tipo_usuario, estado o grupo_id → requiere ser ADMINISTRACION en el equipo.
-    - Cambiar clave_temp → cualquier usuario autenticado puede hacerlo.
+    🔄 SINCRONIZACIÓN DE ROL:
+    Cuando cambia tipo_usuario en miembro_equipo, se actualiza
+    también el campo rol en usuariosPrueba aplicando el mapeo:
+    - ADMINISTRACION → ADMINISTRADOR
+    - MIEMBRO → PRACTICANTE
     """
     miembro = db.query(MiembroEquipo).filter(MiembroEquipo.id == miembro_id).first()
     if not miembro:
@@ -348,8 +373,19 @@ def editar_miembro(
             raise HTTPException(status_code=404, detail="Grupo no encontrado")
         miembro.grupo_id = datos.grupo_id
 
+    # 🔄 CAMBIO DE ROL: actualizar AMBAS tablas con mapeo
     if datos.tipo_usuario is not None:
-        miembro.tipo_usuario = datos.tipo_usuario.upper()
+        nuevo_tipo = datos.tipo_usuario.upper()
+        miembro.tipo_usuario = nuevo_tipo
+
+        # Sincronizar con usuariosPrueba.rol aplicando el mapeo
+        usuario_del_miembro = (
+            db.query(Usuario)
+            .filter(Usuario.id == miembro.usuario_id)
+            .first()
+        )
+        if usuario_del_miembro:
+            usuario_del_miembro.rol = convertir_a_rol_global(nuevo_tipo)
 
     if datos.estado is not None:
         miembro.estado = datos.estado.upper()
@@ -479,6 +515,8 @@ def desasignar_etiqueta_de_miembro(
     db.commit()
     db.refresh(miembro)
     return _construir_miembro_out(miembro)
+
+
 # ════════════════════════════════════════════════════════════════════════════════
 # DESLOGEO / BLOQUEO FORZADO POR ADMIN
 # ════════════════════════════════════════════════════════════════════════════════
@@ -572,28 +610,4 @@ def reactivar_usuario(
     return {
         "ok": True,
         "mensaje": f"El usuario {usuario_objetivo.nombre} {usuario_objetivo.apellido} ha sido reactivado"
-    }
-@router.post("/miembros/{usuario_id}/reactivar", status_code=status.HTTP_200_OK)
-def reactivar_usuario(
-    usuario_id: int,
-    db: Session = Depends(get_db),
-    usuario_actual: Usuario = Depends(get_usuario_actual),
-):
-    """Reactiva la cuenta de un usuario previamente desconectado."""
-    verificar_es_admin(
-        db,
-        usuario_actual,
-        mensaje_error="Solo ADMINISTRACION puede reactivar usuarios"
-    )
-
-    usuario_objetivo = db.query(Usuario).filter(Usuario.id == usuario_id).first()
-    if not usuario_objetivo:
-        raise HTTPException(404, "Usuario no encontrado")
-
-    usuario_objetivo.activo = True
-    db.commit()
-
-    return {
-        "ok": True,
-        "mensaje": f"{usuario_objetivo.nombre} {usuario_objetivo.apellido} ha sido reactivado"
     }
