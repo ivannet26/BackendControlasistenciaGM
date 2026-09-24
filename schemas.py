@@ -165,6 +165,7 @@ class TiempoIniciar(BaseModel):
     tarea_id: Optional[int] = None
 
     descripcion: Optional[str] = None
+    etiquetas_ids: Optional[List[int]] = []
 
 
 class TiempoRegistroOut(BaseModel):
@@ -188,6 +189,7 @@ class TiempoRegistroOut(BaseModel):
     fin: Optional[datetime] = None
 
     duracion_segundos: int
+    etiquetas: List[EtiquetaSimple] = []
 
     class Config:
         

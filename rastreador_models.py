@@ -42,6 +42,28 @@ tarea_miembro = Table(
 )
 
 
+# ============================================================
+# TABLA INTERMEDIA: TIEMPO_REGISTRO <-> ETIQUETA (muchos a muchos)
+# ============================================================
+
+tiempo_etiqueta = Table(
+    "tiempo_etiqueta",
+    Base.metadata,
+    Column(
+        "tiempo_id",
+        Integer,
+        ForeignKey("tiempo_registros.id", ondelete="CASCADE"),
+        primary_key=True
+    ),
+    Column(
+        "etiqueta_id",
+        Integer,
+        ForeignKey("etiquetas.id", ondelete="CASCADE"),
+        primary_key=True
+    )
+)
+
+
 class Tarea(Base):
     __tablename__ = "rastreador_tareas"
 
@@ -265,6 +287,15 @@ class TiempoRegistro(Base):
     tarea = relationship(
         "Tarea",
         foreign_keys=[tarea_id]
+    )
+
+    # NUEVO: Relación muchos-a-muchos con etiquetas
+    # lazy="selectin" hace que las etiquetas se carguen
+    # automáticamente al consultar los registros
+    etiquetas = relationship(
+        "Etiqueta",
+        secondary="tiempo_etiqueta",
+        lazy="selectin"
     )
 
     # ========================================================

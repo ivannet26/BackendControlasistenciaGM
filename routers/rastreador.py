@@ -729,6 +729,21 @@ def iniciar_temporizador(
         duracion_segundos=0
     )
 
+    # ========================================================
+    # NUEVO: Asignamos las etiquetas al nuevo registro
+    # ========================================================
+
+    if datos.etiquetas_ids:
+        etiquetas = (
+            db.query(Etiqueta)
+            .filter(
+                Etiqueta.id.in_(datos.etiquetas_ids),
+                Etiqueta.archivado == False
+            )
+            .all()
+        )
+        nuevo_registro.etiquetas = etiquetas
+
     db.add(nuevo_registro)
     db.commit()
     db.refresh(nuevo_registro)
