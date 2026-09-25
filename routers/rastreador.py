@@ -919,3 +919,54 @@ def eliminar_registro_tiempo(
     db.commit()
 
     return None
+    # ============================================================
+# TEMPORIZADOR: AJUSTAR TIEMPO (descontar inactividad)
+# ============================================================
+
+@router.post(
+    "/tiempo/ajustar",
+    response_model=schemas.TiempoRegistroOut
+)
+def ajustar_tiempo_registro(
+    registro_id: int,
+    segundos_descontar: int,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_usuario_actual)
+):
+    """
+    Ajusta el tiempo de un registro ACTIVO descontando segundos.
+    Se usa para descontar tiempo de inactividad.
+    """
+    registro = db.query(TiempoRegistro).filter(
+        TiempoRegistro.id == registro_id,
+        TiempoRegistro.usuario_id == usuario.id,
+    ).first()
+
+    if not registro:
+        raise HTTPException(
+            status_code=404,
+            detail="Registro no encontrado"
+        )
+
+    if registro.fin is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="No se puede ajustar un registro ya cerrado"
+        )
+
+    ahora = datetime.now(TZ_PERU)
+
+    if registro.inicio.tzinfo is None:
+        inicio_aware = registro.inicio.replace(tzinfo=TZ_PERU)
+    else:
+        inicio_aware = registro.inicio
+
+    segundos_actuales = int((ahora - inicio_aware).total_seconds())
+    segundos_nuevos = max(0, segundos_actuales - segundos_descontar)
+
+    nuevo_inicio = ahora - timedelta(seconds=segundos_nuevos)
+    registro.inicio = nuevo_inicio.replace(tzinfo=None)
+
+    db.commit()
+    db.refresh(registro)
+    return registro
