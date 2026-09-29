@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
+from passlib.context import CryptContext
 import os
 
 from database import get_db
@@ -19,28 +20,35 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 480
 
 security = HTTPBearer()
 
+# ============================================================
+# HASHEO DE CONTRASEÑAS con bcrypt
+# ============================================================
 
-# ============================================================
-# ⚠️ SIN HASHEO - SOLO PARA DESARROLLO
-# Las contraseñas se guardan y verifican en TEXTO PLANO
-# NO usar en producción con usuarios reales
-# ============================================================
+_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
 
 def hash_password(password: str) -> str:
-    """
-    ⚠️ SIN HASHEO - Devuelve la contraseña en texto plano.
-    """
-    return password
+    """Genera un hash bcrypt de la contraseña."""
+    return _pwd_context.hash(password)
 
 
 def verificar_password(
     plain_password: str,
     hashed_password: str
 ) -> bool:
+    """Verifica la contraseña contra su hash bcrypt."""
+    return _pwd_context.verify(plain_password, hashed_password)
+
+
+def es_texto_plano(password_hash: str) -> bool:
     """
-    ⚠️ SIN HASHEO - Compara texto plano con texto plano.
+    Detecta si el valor guardado es texto plano (no un hash bcrypt).
+    Los hashes bcrypt siempre empiezan con '$2b$' o '$2a$'.
     """
-    return plain_password == hashed_password
+    return not (
+        password_hash.startswith("$2b$") or
+        password_hash.startswith("$2a$")
+    )
 
 
 # ============================================================
@@ -81,7 +89,6 @@ def decodificar_token(token: str):
 
     except JWTError:
         return None
-
 
 def get_usuario_actual(
     credentials: HTTPAuthorizationCredentials = Depends(security),
@@ -125,3 +132,59 @@ def get_usuario_actual(
         )
 
     return usuario
+
+# ============================================================
+# PERMISOS: SOLO ADMINISTRADORES
+# ============================================================
+
+ROLES_ADMIN = {
+    "ADMIN",
+    "ADMINISTRADOR",
+    "ADMINISTRACION",
+    "SUPERADMIN",
+}
+
+
+def requiere_admin(
+    usuario: Usuario = Depends(get_usuario_actual)
+) -> Usuario:
+    """Solo ADMIN / ADMINISTRADOR pueden acceder."""
+    rol = (getattr(usuario, "rol", "") or "").strip().upper()
+
+    if rol not in ROLES_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para realizar esta acción. Se requiere rol de administrador."
+        )
+
+    return usuario
+
+
+# ============================================================
+# PERMISOS ELEVADOS PARA AUDITORÍA
+# ============================================================
+
+ROLES_AUDITORIA = {
+    "ADMIN",
+    "ADMINISTRADOR",
+    "SUPERADMIN",
+    "SUPERVISOR",
+}
+
+
+def requiere_auditoria(
+    usuario: Usuario = Depends(get_usuario_actual)
+) -> Usuario:
+
+    rol = (
+        getattr(usuario, "rol", "") or ""
+    ).strip().upper()
+
+    if rol not in ROLES_AUDITORIA:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para consultar la auditoría de proyectos"
+        )
+
+    return usuario
+

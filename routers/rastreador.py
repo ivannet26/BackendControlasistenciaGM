@@ -11,7 +11,7 @@ from models import Usuario
 from equipo_models import Etiqueta
 from proyecto_models import Proyecto
 from rastreador_models import Tarea, EnlaceRastreador, TiempoRegistro
-from security import get_usuario_actual
+from security import get_usuario_actual, requiere_admin
 
 
 router = APIRouter(
@@ -729,21 +729,6 @@ def iniciar_temporizador(
         duracion_segundos=0
     )
 
-    # ========================================================
-    # NUEVO: Asignamos las etiquetas al nuevo registro
-    # ========================================================
-
-    if datos.etiquetas_ids:
-        etiquetas = (
-            db.query(Etiqueta)
-            .filter(
-                Etiqueta.id.in_(datos.etiquetas_ids),
-                Etiqueta.archivado == False
-            )
-            .all()
-        )
-        nuevo_registro.etiquetas = etiquetas
-
     db.add(nuevo_registro)
     db.commit()
     db.refresh(nuevo_registro)
@@ -919,54 +904,39 @@ def eliminar_registro_tiempo(
     db.commit()
 
     return None
-    # ============================================================
-# TEMPORIZADOR: AJUSTAR TIEMPO (descontar inactividad)
+
+
+# ============================================================
+# ELIMINAR REGISTRO DE TIEMPO (ADMIN)
+# Solo administradores pueden borrar registros de cualquier usuario
 # ============================================================
 
-@router.post(
-    "/tiempo/ajustar",
-    response_model=schemas.TiempoRegistroOut
+@router.delete(
+    "/admin/tiempo/{registro_id}",
+    status_code=status.HTTP_204_NO_CONTENT
 )
-def ajustar_tiempo_registro(
+def eliminar_registro_tiempo_admin(
     registro_id: int,
-    segundos_descontar: int,
     db: Session = Depends(get_db),
-    usuario: Usuario = Depends(get_usuario_actual)
+    _=Depends(requiere_admin)
 ):
-    """
-    Ajusta el tiempo de un registro ACTIVO descontando segundos.
-    Se usa para descontar tiempo de inactividad.
-    """
     registro = db.query(TiempoRegistro).filter(
-        TiempoRegistro.id == registro_id,
-        TiempoRegistro.usuario_id == usuario.id,
+        TiempoRegistro.id == registro_id
     ).first()
 
     if not registro:
         raise HTTPException(
             status_code=404,
-            detail="Registro no encontrado"
+            detail="Registro de tiempo no encontrado"
         )
 
-    if registro.fin is not None:
+    if registro.fin is None:
         raise HTTPException(
             status_code=400,
-            detail="No se puede ajustar un registro ya cerrado"
+            detail="No se puede eliminar un temporizador que está activo"
         )
 
-    ahora = datetime.now(TZ_PERU)
-
-    if registro.inicio.tzinfo is None:
-        inicio_aware = registro.inicio.replace(tzinfo=TZ_PERU)
-    else:
-        inicio_aware = registro.inicio
-
-    segundos_actuales = int((ahora - inicio_aware).total_seconds())
-    segundos_nuevos = max(0, segundos_actuales - segundos_descontar)
-
-    nuevo_inicio = ahora - timedelta(seconds=segundos_nuevos)
-    registro.inicio = nuevo_inicio.replace(tzinfo=None)
-
+    db.delete(registro)
     db.commit()
-    db.refresh(registro)
-    return registro
+
+    return None

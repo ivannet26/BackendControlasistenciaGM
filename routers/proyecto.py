@@ -1,26 +1,147 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
-from typing import List, Optional
-from sqlalchemy import func
 
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    status,
+    Request
+)
+from sqlalchemy.orm import Session
+from sqlalchemy import func, desc
+from typing import List, Optional
+import json
 from database import get_db
 from models import Usuario
 from cliente_models import Cliente
 from proyecto_models import Proyecto
+from proyecto_auditoria_models import ProyectoAuditoria
 from rastreador_models import TiempoRegistro
 from proyecto_schemas import (
     ProyectoCrear,
     ProyectoEditar,
     ProyectoOut,
+    ProyectoAuditoriaOut,
 )
-from security import get_usuario_actual
 
+from security import (
+    get_usuario_actual,
+    requiere_admin,
+    requiere_auditoria
+)
 
 router = APIRouter(
     prefix="/proyectos",
     tags=["Proyectos"]
 )
 
+# ============================================================
+# AUDITORÍA DE PROYECTOS
+# ============================================================
+
+def _snapshot_proyecto(proyecto: Proyecto) -> dict:
+
+    return {
+        "id": proyecto.id,
+        "nombre": proyecto.nombre,
+        "descripcion": proyecto.descripcion,
+        "cliente_id": proyecto.cliente_id,
+        "estado": proyecto.estado,
+        "color": proyecto.color,
+        "archivado": proyecto.archivado,
+    }
+
+
+def registrar_auditoria(
+    db: Session,
+    usuario: Usuario,
+    proyecto: Proyecto,
+    accion: str,
+    detalle: str,
+    datos_anteriores: Optional[dict] = None,
+    datos_nuevos: Optional[dict] = None,
+):
+
+    usuario_nombre = (
+        f"{usuario.nombre} {usuario.apellido}"
+    ).strip()
+
+    registro = ProyectoAuditoria(
+
+        proyecto_id=proyecto.id,
+
+        proyecto_nombre=proyecto.nombre,
+
+        usuario_id=usuario.id,
+
+        usuario_nombre=usuario_nombre,
+
+        accion=accion,
+
+        detalle=detalle,
+
+        datos_anteriores=(
+            json.dumps(
+                datos_anteriores,
+                ensure_ascii=False,
+                default=str
+            )
+            if datos_anteriores is not None
+            else None
+        ),
+
+        datos_nuevos=(
+            json.dumps(
+                datos_nuevos,
+                ensure_ascii=False,
+                default=str
+            )
+            if datos_nuevos is not None
+            else None
+        ),
+    )
+
+    db.add(registro)
+
+
+def _parse_auditoria(
+    registro: ProyectoAuditoria
+) -> dict:
+
+    def cargar(valor):
+
+        if not valor:
+            return None
+
+        try:
+            return json.loads(valor)
+
+        except (
+            TypeError,
+            json.JSONDecodeError
+        ):
+            return None
+
+    return {
+
+        "id": registro.id,
+
+        "proyecto_id": registro.proyecto_id,
+        "proyecto_nombre": registro.proyecto_nombre,
+        "usuario_id": registro.usuario_id,
+        "usuario_nombre": registro.usuario_nombre,
+        "accion": registro.accion,
+        "detalle": registro.detalle,
+        "datos_anteriores": cargar(
+            registro.datos_anteriores
+        ),
+
+        "datos_nuevos": cargar(
+            registro.datos_nuevos
+        ),
+
+        "fecha": registro.fecha,
+    }
 
 # ============================================================
 # FUNCIÓN AUXILIAR
@@ -173,7 +294,7 @@ def obtener_proyecto(
 def crear_proyecto(
     datos: ProyectoCrear,
     db: Session = Depends(get_db),
-    _: Usuario = Depends(get_usuario_actual),
+    usuario: Usuario = Depends(requiere_admin),
 ):
 
     # Verificar cliente
@@ -225,6 +346,17 @@ def crear_proyecto(
     db.commit()
     db.refresh(proyecto)
 
+    registrar_auditoria(
+        db=db,
+        usuario=usuario,
+        proyecto=proyecto,
+        accion="CREAR",
+        detalle=f"Proyecto '{proyecto.nombre}' creado",
+        datos_anteriores=None,
+        datos_nuevos=_snapshot_proyecto(proyecto),
+    )
+    db.commit()
+
     return construir_proyecto_out(proyecto, db)
 
 
@@ -240,7 +372,7 @@ def editar_proyecto(
     proyecto_id: int,
     datos: ProyectoEditar,
     db: Session = Depends(get_db),
-    _: Usuario = Depends(get_usuario_actual),
+    usuario: Usuario = Depends(requiere_admin),
 ):
 
     proyecto = (
@@ -254,6 +386,9 @@ def editar_proyecto(
             status_code=404,
             detail="Proyecto no encontrado"
         )
+
+    # Snapshot del estado anterior ANTES de aplicar cambios
+    snapshot_anterior = _snapshot_proyecto(proyecto)
 
     # Cambiar nombre
     if datos.nombre is not None:
@@ -313,6 +448,17 @@ def editar_proyecto(
     db.commit()
     db.refresh(proyecto)
 
+    registrar_auditoria(
+        db=db,
+        usuario=usuario,
+        proyecto=proyecto,
+        accion="EDITAR",
+        detalle=f"Proyecto '{proyecto.nombre}' editado",
+        datos_anteriores=snapshot_anterior,
+        datos_nuevos=_snapshot_proyecto(proyecto),
+    )
+    db.commit()
+
     return construir_proyecto_out(proyecto, db)
 
 
@@ -327,7 +473,7 @@ def editar_proyecto(
 def archivar_proyecto(
     proyecto_id: int,
     db: Session = Depends(get_db),
-    _: Usuario = Depends(get_usuario_actual),
+    usuario: Usuario = Depends(requiere_admin),
 ):
 
     proyecto = (
@@ -348,11 +494,24 @@ def archivar_proyecto(
             detail="El proyecto ya está archivado"
         )
 
+    snapshot_anterior = _snapshot_proyecto(proyecto)
+
     proyecto.archivado = True
     proyecto.estado = "ARCHIVADO"
 
     db.commit()
     db.refresh(proyecto)
+
+    registrar_auditoria(
+        db=db,
+        usuario=usuario,
+        proyecto=proyecto,
+        accion="ARCHIVAR",
+        detalle=f"Proyecto '{proyecto.nombre}' archivado",
+        datos_anteriores=snapshot_anterior,
+        datos_nuevos=_snapshot_proyecto(proyecto),
+    )
+    db.commit()
 
     return construir_proyecto_out(proyecto, db)
 
@@ -368,7 +527,7 @@ def archivar_proyecto(
 def desarchivar_proyecto(
     proyecto_id: int,
     db: Session = Depends(get_db),
-    _: Usuario = Depends(get_usuario_actual),
+    usuario: Usuario = Depends(requiere_admin),
 ):
 
     proyecto = (
@@ -389,11 +548,24 @@ def desarchivar_proyecto(
             detail="El proyecto ya está activo"
         )
 
+    snapshot_anterior = _snapshot_proyecto(proyecto)
+
     proyecto.archivado = False
     proyecto.estado = "ACTIVO"
 
     db.commit()
     db.refresh(proyecto)
+
+    registrar_auditoria(
+        db=db,
+        usuario=usuario,
+        proyecto=proyecto,
+        accion="DESARCHIVAR",
+        detalle=f"Proyecto '{proyecto.nombre}' desarchivado",
+        datos_anteriores=snapshot_anterior,
+        datos_nuevos=_snapshot_proyecto(proyecto),
+    )
+    db.commit()
 
     return construir_proyecto_out(proyecto, db)
 
@@ -409,7 +581,7 @@ def desarchivar_proyecto(
 def eliminar_proyecto(
     proyecto_id: int,
     db: Session = Depends(get_db),
-    _: Usuario = Depends(get_usuario_actual),
+    usuario: Usuario = Depends(requiere_admin),
 ):
 
     proyecto = (
@@ -424,7 +596,107 @@ def eliminar_proyecto(
             detail="Proyecto no encontrado"
         )
 
+    # Guardamos el snapshot antes de eliminar
+    snapshot_anterior = _snapshot_proyecto(proyecto)
+    nombre_proyecto = proyecto.nombre
+
+    # Registrar auditoría ANTES de eliminar el proyecto
+    # (el registro apunta a proyecto_id que quedará huérfano,
+    #  pero proyecto_nombre queda guardado como texto)
+    registrar_auditoria(
+        db=db,
+        usuario=usuario,
+        proyecto=proyecto,
+        accion="ELIMINAR",
+        detalle=f"Proyecto '{nombre_proyecto}' eliminado permanentemente",
+        datos_anteriores=snapshot_anterior,
+        datos_nuevos=None,
+    )
+
     db.delete(proyecto)
     db.commit()
 
     return None
+
+
+# ============================================================
+# HISTORIAL DE AUDITORÍA
+# ============================================================
+
+@router.get(
+    "/auditoria",
+    response_model=List[ProyectoAuditoriaOut],
+    summary="Historial de auditoría de proyectos",
+    description=(
+        "Devuelve el historial de acciones sobre proyectos "
+        "(CREAR, EDITAR, ARCHIVAR, DESARCHIVAR, ELIMINAR). "
+        "Solo accesible para ADMIN, ADMINISTRADOR, SUPERADMIN y SUPERVISOR."
+    ),
+)
+def listar_auditoria(
+    proyecto_id: Optional[int] = Query(
+        None,
+        description="Filtrar por proyecto específico"
+    ),
+    usuario_id: Optional[int] = Query(
+        None,
+        description="Filtrar por usuario que realizó la acción"
+    ),
+    accion: Optional[str] = Query(
+        None,
+        description="Filtrar por acción: CREAR, EDITAR, ARCHIVAR, DESARCHIVAR, ELIMINAR"
+    ),
+    limite: int = Query(
+        100,
+        ge=1,
+        le=500,
+        description="Cantidad máxima de registros a devolver"
+    ),
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(requiere_auditoria),
+):
+    query = db.query(ProyectoAuditoria)
+
+    if proyecto_id is not None:
+        query = query.filter(
+            ProyectoAuditoria.proyecto_id == proyecto_id
+        )
+
+    if usuario_id is not None:
+        query = query.filter(
+            ProyectoAuditoria.usuario_id == usuario_id
+        )
+
+    if accion is not None:
+        query = query.filter(
+            ProyectoAuditoria.accion == accion.upper()
+        )
+
+    registros = (
+        query
+        .order_by(desc(ProyectoAuditoria.fecha))
+        .limit(limite)
+        .all()
+    )
+
+    return [_parse_auditoria(r) for r in registros]
+
+
+@router.get(
+    "/{proyecto_id}/auditoria",
+    response_model=List[ProyectoAuditoriaOut],
+    summary="Historial de auditoría de un proyecto específico",
+)
+def listar_auditoria_proyecto(
+    proyecto_id: int,
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(requiere_auditoria),
+):
+    registros = (
+        db.query(ProyectoAuditoria)
+        .filter(ProyectoAuditoria.proyecto_id == proyecto_id)
+        .order_by(desc(ProyectoAuditoria.fecha))
+        .all()
+    )
+
+    return [_parse_auditoria(r) for r in registros]
