@@ -244,3 +244,63 @@ def activar_usuario(
     db.refresh(usuario)
     return usuario
 
+
+# ── POST /auth/usuarios ───────────────────────────────────────────────────────
+
+ROLES_VALIDOS = {"PRACTICANTE", "ADMIN", "ADMINISTRADOR", "ADMINISTRACION", "SUPERVISOR", "SUPERADMIN"}
+
+@router.post(
+    "/usuarios",
+    response_model=schemas.UsuarioOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Crear usuario (solo administradores)",
+    description=(
+        "Permite a un administrador crear un nuevo usuario con rol personalizable. "
+        "Roles disponibles: PRACTICANTE, SUPERVISOR, ADMIN, ADMINISTRADOR, ADMINISTRACION, SUPERADMIN."
+    ),
+)
+def crear_usuario(
+    datos: schemas.UsuarioCrear,
+    db: Session = Depends(get_db),
+    usuario_actual: models.Usuario = Depends(get_usuario_actual),
+):
+    # Solo admins pueden crear usuarios
+    rol_actual = (usuario_actual.rol or "").strip().upper()
+    if rol_actual not in ROLES_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo los administradores pueden crear usuarios",
+        )
+
+    # Validar que el rol enviado sea uno permitido
+    rol_nuevo = (datos.rol or "PRACTICANTE").strip().upper()
+    if rol_nuevo not in ROLES_VALIDOS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Rol inválido. Los roles permitidos son: {', '.join(sorted(ROLES_VALIDOS))}",
+        )
+
+    # Verificar que el email no esté en uso
+    existe = db.query(models.Usuario).filter(
+        models.Usuario.email == datos.email
+    ).first()
+    if existe:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ya existe un usuario con ese email",
+        )
+
+    nuevo = models.Usuario(
+        nombre=datos.nombre.strip(),
+        apellido=datos.apellido.strip(),
+        email=datos.email,
+        password_hash=hash_password(datos.password),
+        rol=rol_nuevo,
+        activo=True,
+    )
+
+    db.add(nuevo)
+    db.commit()
+    db.refresh(nuevo)
+    return nuevo
+
