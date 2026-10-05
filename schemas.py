@@ -9,7 +9,13 @@ class UsuarioRegistro(BaseModel):
     apellido: str
     email: EmailStr
     password: str
-
+# Para creación desde el panel de administrador
+class UsuarioCrear(BaseModel):
+    nombre: str
+    apellido: str
+    email: EmailStr
+    password: str
+    rol: str = "PRACTICANTE" # El admin puede enviar el rol, por defecto es practicante
 # Para login
 class LoginRequest(BaseModel):
     email: EmailStr
@@ -194,3 +200,11 @@ class TiempoRegistroOut(BaseModel):
     class Config:
         
         from_attributes = True
+    # Para editar usuario
+class UsuarioEditar(BaseModel):
+    nombre: Optional[str] = None
+    apellido: Optional[str] = None
+    email: Optional[EmailStr] = None
+    password: Optional[str] = None
+    rol: Optional[str] = None
+    activo: Optional[bool] = None

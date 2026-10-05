@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
+from routers import usuarios as usuarios_router 
 from database import Base, engine
 from routers import auth as auth_router
 from routers import equipo as equipo_router
@@ -16,7 +16,7 @@ import rastreador_models  # noqa: F401
 import equipo_models  # noqa: F401
 import cliente_models  # noqa: F401
 import proyecto_models  # noqa: F401
-
+import models
 
 
 
@@ -54,6 +54,7 @@ app.add_middleware(
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(auth_router.router)
 app.include_router(rastreador_router.router)
+app.include_router(usuarios_router.router)
 app.include_router(equipo_router.router)
 app.include_router(cliente_router.router)
 app.include_router(etiqueta_router.router)

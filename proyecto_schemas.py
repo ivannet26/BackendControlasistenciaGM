@@ -2,7 +2,24 @@ from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel
+from typing import Optional, List, Any
+from datetime import datetime
+from pydantic import BaseModel
 
+class ProyectoAuditoriaOut(BaseModel):
+    id: int
+    proyecto_id: Optional[int] = None
+    proyecto_nombre: Optional[str] = None
+    usuario_id: Optional[int] = None
+    usuario_nombre: Optional[str] = None
+    accion: str
+    detalle: Optional[str] = None
+    datos_anteriores: Optional[dict[str, Any]] = None
+    datos_nuevos: Optional[dict[str, Any]] = None
+    fecha: datetime
+
+    class Config:
+        from_attributes = True
 
 class ProyectoCrear(BaseModel):
     nombre: str
