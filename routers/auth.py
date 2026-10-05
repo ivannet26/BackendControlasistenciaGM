@@ -247,7 +247,7 @@ def activar_usuario(
 
 # ── POST /auth/usuarios ───────────────────────────────────────────────────────
 
-ROLES_VALIDOS = {"PRACTICANTE", "ADMIN", "ADMINISTRADOR", "ADMINISTRACION", "SUPERVISOR", "SUPERADMIN"}
+ROLES_VALIDOS = {"PRACTICANTE", "ADMINISTRADOR"}
 
 @router.post(
     "/usuarios",
