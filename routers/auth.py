@@ -1,7 +1,8 @@
+import uuid
 from datetime import timedelta
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 import models
@@ -9,12 +10,22 @@ import schemas
 from security import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     crear_token,
+    get_sesion_actual,
     get_usuario_actual,
     hash_password,
     verificar_password,
     es_texto_plano,
 )
 from database import get_db
+from sesion_models import SesionUsuario
+from sesion_schemas import SesionOut
+from sesiones import (
+    MAX_SESIONES_ACTIVAS,
+    ahora_utc,
+    crear_sesion,
+    revocar_sesion,
+    revocar_todas,
+)
 
 
 router = APIRouter(prefix="/auth", tags=["Autenticación"])

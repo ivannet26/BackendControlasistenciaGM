@@ -8,6 +8,8 @@ import os
 
 from database import get_db
 from models import Usuario
+from sesion_models import SesionUsuario
+from sesiones import obtener_sesion_valida
 
 
 SECRET_KEY = os.getenv(
@@ -90,14 +92,13 @@ def decodificar_token(token: str):
     except JWTError:
         return None
 
-def get_usuario_actual(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
-) -> Usuario:
 
-    token = credentials.credentials
-
-    payload = decodificar_token(token)
+def _validar_credenciales(
+    credentials: HTTPAuthorizationCredentials,
+    db: Session,
+):
+    """Valida JWT + usuario + sesión en BD. Devuelve (usuario, sesion)."""
+    payload = decodificar_token(credentials.credentials)
 
     if not payload:
         raise HTTPException(
@@ -131,7 +132,34 @@ def get_usuario_actual(
             detail="Usuario desactivado",
         )
 
+    # La sesión debe seguir activa en BD (no cerrada por logout, límite o admin)
+    sesion = obtener_sesion_valida(db, payload.get("jti"), usuario.id)
+    if not sesion:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sesión cerrada o expirada. Inicia sesión nuevamente.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return usuario, sesion
+
+
+def get_usuario_actual(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+) -> Usuario:
+    usuario, _ = _validar_credenciales(credentials, db)
     return usuario
+
+
+def get_sesion_actual(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+) -> SesionUsuario:
+    """Devuelve la sesión (fila de sesiones_usuario) del token actual."""
+    _, sesion = _validar_credenciales(credentials, db)
+    return sesion
+
 
 # ============================================================
 # PERMISOS: SOLO ADMINISTRADORES
@@ -187,4 +215,3 @@ def requiere_auditoria(
         )
 
     return usuario
-

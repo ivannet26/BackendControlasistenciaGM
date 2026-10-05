@@ -1,4 +1,3 @@
-
 from fastapi import (
     APIRouter,
     Depends,
@@ -17,13 +16,13 @@ from cliente_models import Cliente
 from proyecto_models import Proyecto
 from proyecto_auditoria_models import ProyectoAuditoria
 from rastreador_models import TiempoRegistro
+from auditoria_models import AuditoriaProyecto
 from proyecto_schemas import (
     ProyectoCrear,
     ProyectoEditar,
     ProyectoOut,
     ProyectoAuditoriaOut,
 )
-
 from security import (
     get_usuario_actual,
     requiere_admin,
@@ -143,28 +142,19 @@ def _parse_auditoria(
         "fecha": registro.fecha,
     }
 
+
 # ============================================================
-# FUNCIÓN AUXILIAR
+# FUNCIONES AUXILIARES
 # ============================================================
 
-def construir_proyecto_out(proyecto: Proyecto, db: Session) -> dict:
+def construir_proyecto_out(proyecto: Proyecto, total_segundos: int = 0) -> dict:
     """
     Construye la respuesta de un proyecto incluyendo:
     - horas_registradas: float (para compatibilidad)
     - segundos_registrados: int (valor exacto, sin redondeo)
     """
 
-    # Suma exacta de segundos de todas las actividades terminadas
-    total_segundos = (
-        db.query(func.coalesce(func.sum(TiempoRegistro.duracion_segundos), 0))
-        .filter(
-            TiempoRegistro.proyecto_id == proyecto.id,
-            TiempoRegistro.fin.is_not(None)
-        )
-        .scalar()
-    )
-
-    total_segundos = int(total_segundos)
+    total_segundos = int(total_segundos or 0)
     horas_registradas = round(total_segundos / 3600, 2)
 
     return {
@@ -185,6 +175,31 @@ def construir_proyecto_out(proyecto: Proyecto, db: Session) -> dict:
         "creado_en": proyecto.creado_en,
         "actualizado_en": proyecto.actualizado_en,
     }
+
+
+def obtener_segundos_por_proyecto(db: Session, proyecto_ids: List[int]) -> dict:
+    """
+    Devuelve {proyecto_id: total_segundos} para una lista de proyectos
+    en UNA sola consulta (evita el problema N+1).
+    """
+
+    if not proyecto_ids:
+        return {}
+
+    filas = (
+        db.query(
+            TiempoRegistro.proyecto_id,
+            func.coalesce(func.sum(TiempoRegistro.duracion_segundos), 0),
+        )
+        .filter(
+            TiempoRegistro.proyecto_id.in_(proyecto_ids),
+            TiempoRegistro.fin.is_not(None),
+        )
+        .group_by(TiempoRegistro.proyecto_id)
+        .all()
+    )
+
+    return {proyecto_id: int(total) for proyecto_id, total in filas}
 
 
 # ============================================================
@@ -211,7 +226,6 @@ def listar_proyectos(
 
     query = db.query(Proyecto)
 
-    # Por defecto mostramos proyectos activos
     if estado is None or estado.lower() == "activo":
         query = query.filter(
             Proyecto.archivado == False
@@ -231,13 +245,11 @@ def listar_proyectos(
             detail="El estado debe ser activo, archivado o todo"
         )
 
-    # Buscar por nombre
     if nombre:
         query = query.filter(
             Proyecto.nombre.ilike(f"%{nombre}%")
         )
 
-    # Filtrar por cliente
     if cliente_id is not None:
         query = query.filter(
             Proyecto.cliente_id == cliente_id
@@ -247,8 +259,14 @@ def listar_proyectos(
         Proyecto.nombre.asc()
     ).all()
 
+    segundos_por_proyecto = obtener_segundos_por_proyecto(
+        db, [p.id for p in proyectos]
+    )
+
     return [
-        construir_proyecto_out(proyecto, db)
+        construir_proyecto_out(
+            proyecto, segundos_por_proyecto.get(proyecto.id, 0)
+        )
         for proyecto in proyectos
     ]
 
@@ -279,7 +297,8 @@ def obtener_proyecto(
             detail="Proyecto no encontrado"
         )
 
-    return construir_proyecto_out(proyecto, db)
+    segundos = obtener_segundos_por_proyecto(db, [proyecto.id]).get(proyecto.id, 0)
+    return construir_proyecto_out(proyecto, segundos)
 
 
 # ============================================================
@@ -297,7 +316,6 @@ def crear_proyecto(
     usuario: Usuario = Depends(requiere_admin),
 ):
 
-    # Verificar cliente
     if datos.cliente_id is not None:
 
         cliente = (
@@ -318,7 +336,6 @@ def crear_proyecto(
                 detail="No se puede asignar un cliente archivado"
             )
 
-    # Evitar nombres duplicados
     existe = (
         db.query(Proyecto)
         .filter(
@@ -343,8 +360,7 @@ def crear_proyecto(
     )
 
     db.add(proyecto)
-    db.commit()
-    db.refresh(proyecto)
+    db.flush()  # asigna proyecto.id sin cerrar la transacción
 
     registrar_auditoria(
         db=db,
@@ -356,8 +372,10 @@ def crear_proyecto(
         datos_nuevos=_snapshot_proyecto(proyecto),
     )
     db.commit()
+    db.refresh(proyecto)
 
-    return construir_proyecto_out(proyecto, db)
+    segundos = obtener_segundos_por_proyecto(db, [proyecto.id]).get(proyecto.id, 0)
+    return construir_proyecto_out(proyecto, segundos)
 
 
 # ============================================================
@@ -387,10 +405,8 @@ def editar_proyecto(
             detail="Proyecto no encontrado"
         )
 
-    # Snapshot del estado anterior ANTES de aplicar cambios
     snapshot_anterior = _snapshot_proyecto(proyecto)
 
-    # Cambiar nombre
     if datos.nombre is not None:
 
         duplicado = (
@@ -410,11 +426,9 @@ def editar_proyecto(
 
         proyecto.nombre = datos.nombre
 
-    # Cambiar descripción
     if datos.descripcion is not None:
         proyecto.descripcion = datos.descripcion
 
-    # Cambiar cliente
     if datos.cliente_id is not None:
 
         cliente = (
@@ -437,16 +451,11 @@ def editar_proyecto(
 
         proyecto.cliente_id = datos.cliente_id
 
-    # Cambiar estado
     if datos.estado is not None:
         proyecto.estado = datos.estado.upper()
 
-    # Cambiar color
     if datos.color is not None:
         proyecto.color = datos.color
-
-    db.commit()
-    db.refresh(proyecto)
 
     registrar_auditoria(
         db=db,
@@ -458,8 +467,10 @@ def editar_proyecto(
         datos_nuevos=_snapshot_proyecto(proyecto),
     )
     db.commit()
+    db.refresh(proyecto)
 
-    return construir_proyecto_out(proyecto, db)
+    segundos = obtener_segundos_por_proyecto(db, [proyecto.id]).get(proyecto.id, 0)
+    return construir_proyecto_out(proyecto, segundos)
 
 
 # ============================================================
@@ -499,9 +510,6 @@ def archivar_proyecto(
     proyecto.archivado = True
     proyecto.estado = "ARCHIVADO"
 
-    db.commit()
-    db.refresh(proyecto)
-
     registrar_auditoria(
         db=db,
         usuario=usuario,
@@ -512,8 +520,10 @@ def archivar_proyecto(
         datos_nuevos=_snapshot_proyecto(proyecto),
     )
     db.commit()
+    db.refresh(proyecto)
 
-    return construir_proyecto_out(proyecto, db)
+    segundos = obtener_segundos_por_proyecto(db, [proyecto.id]).get(proyecto.id, 0)
+    return construir_proyecto_out(proyecto, segundos)
 
 
 # ============================================================
@@ -553,9 +563,6 @@ def desarchivar_proyecto(
     proyecto.archivado = False
     proyecto.estado = "ACTIVO"
 
-    db.commit()
-    db.refresh(proyecto)
-
     registrar_auditoria(
         db=db,
         usuario=usuario,
@@ -566,8 +573,10 @@ def desarchivar_proyecto(
         datos_nuevos=_snapshot_proyecto(proyecto),
     )
     db.commit()
+    db.refresh(proyecto)
 
-    return construir_proyecto_out(proyecto, db)
+    segundos = obtener_segundos_por_proyecto(db, [proyecto.id]).get(proyecto.id, 0)
+    return construir_proyecto_out(proyecto, segundos)
 
 
 # ============================================================
@@ -596,13 +605,9 @@ def eliminar_proyecto(
             detail="Proyecto no encontrado"
         )
 
-    # Guardamos el snapshot antes de eliminar
     snapshot_anterior = _snapshot_proyecto(proyecto)
     nombre_proyecto = proyecto.nombre
 
-    # Registrar auditoría ANTES de eliminar el proyecto
-    # (el registro apunta a proyecto_id que quedará huérfano,
-    #  pero proyecto_nombre queda guardado como texto)
     registrar_auditoria(
         db=db,
         usuario=usuario,

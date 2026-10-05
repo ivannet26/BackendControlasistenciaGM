@@ -13,6 +13,7 @@ from security import get_usuario_actual
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from rastreador_models import TiempoRegistro
+from sesiones import revocar_todas
 
 TZ_PERU = ZoneInfo("America/Lima")
 router = APIRouter(prefix="/equipo", tags=["Equipo"])
@@ -555,8 +556,9 @@ def deslogear_usuario(
     if not usuario_objetivo:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
-    # 1. Desactivar la cuenta
+    # 1. Desactivar la cuenta y cerrar todas sus sesiones
     usuario_objetivo.activo = False
+    sesiones_cerradas = revocar_todas(db, usuario_id, "CUENTA_DESACTIVADA")
 
     # 2. Cerrar todos los TiempoRegistro abiertos
     ahora = datetime.now(TZ_PERU)
@@ -587,7 +589,8 @@ def deslogear_usuario(
     return {
         "ok": True,
         "mensaje": f"{usuario_objetivo.nombre} {usuario_objetivo.apellido} ha sido desconectado",
-        "registros_cerrados": len(registros_abiertos)
+        "registros_cerrados": len(registros_abiertos),
+        "sesiones_cerradas": sesiones_cerradas,
     }
 
 

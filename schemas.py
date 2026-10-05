@@ -3,6 +3,14 @@ from datetime import datetime, date
 from typing import Optional, List
 
 
+# Para editar usuario (todos los campos opcionales)
+class UsuarioEditar(BaseModel):
+    nombre: Optional[str] = None
+    apellido: Optional[str] = None
+    email: Optional[EmailStr] = None
+    password: Optional[str] = None
+
+
 # Para registro
 class UsuarioRegistro(BaseModel):
     nombre: str

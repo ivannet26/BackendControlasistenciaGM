@@ -16,14 +16,16 @@ import rastreador_models  # noqa: F401
 import equipo_models  # noqa: F401
 import cliente_models  # noqa: F401
 import proyecto_models  # noqa: F401
-import models
+import models  # noqa: F401
+import proyecto_auditoria_models  # noqa: F401
+import auditoria_models  # noqa: F401
+import sesion_models  # noqa: F401
 
 
 
 load_dotenv()
 
 # Crea todas las tablas en la BD si no existen
-# (en producción se usa Alembic para migraciones, pero esto funciona perfecto para empezar)
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
@@ -33,8 +35,6 @@ app = FastAPI(
 )
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
-# Permite que el frontend (React, etc.) se comunique con esta API
-# En producción cambia ["*"] por la URL real del frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

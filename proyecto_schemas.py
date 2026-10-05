@@ -53,3 +53,33 @@ class ProyectoOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+# ============================================================
+# AUDITORÍA DE PROYECTOS
+# ============================================================
+
+class ProyectoAuditoriaOut(BaseModel):
+
+    id: int
+
+    proyecto_id: Optional[int] = None
+
+    proyecto_nombre: Optional[str] = None
+
+    usuario_id: Optional[int] = None
+
+    usuario_nombre: Optional[str] = None
+
+    accion: str
+
+    detalle: Optional[str] = None
+
+    datos_anteriores: Optional[dict] = None
+
+    datos_nuevos: Optional[dict] = None
+
+    fecha: datetime
+
+    class Config:
+        from_attributes = True
+
