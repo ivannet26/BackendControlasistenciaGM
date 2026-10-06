@@ -2,7 +2,8 @@ from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func, case
 
 from database import get_db
 from models import Usuario
@@ -74,17 +75,26 @@ def obtener_resumen_panel(
     etiquetas_activas = db.query(Etiqueta).filter(Etiqueta.archivado == False).count()
     etiquetas_archivadas = db.query(Etiqueta).filter(Etiqueta.archivado == True).count()
 
-    total_tareas = db.query(Tarea).count()
-    tareas_pendientes = db.query(Tarea).filter(Tarea.estado == "PENDIENTE").count()
-    tareas_en_progreso = db.query(Tarea).filter(Tarea.estado == "EN_PROGRESO").count()
-    tareas_completadas = db.query(Tarea).filter(Tarea.estado == "COMPLETADA").count()
-
+    # OPTIMIZACIÓN: Todos los conteos de tareas en 1 sola consulta agregada
     hoy = datetime.now(TZ_PERU).date()
-    tareas_vencidas = (
-        db.query(Tarea)
-        .filter(Tarea.fecha_limite < hoy, Tarea.estado != "COMPLETADA")
-        .count()
-    )
+    resumen_tareas = db.query(
+        func.count(Tarea.id).label('total'),
+        func.sum(case((Tarea.estado == "PENDIENTE", 1), else_=0)).label('pendientes'),
+        func.sum(case((Tarea.estado == "EN_PROGRESO", 1), else_=0)).label('en_progreso'),
+        func.sum(case((Tarea.estado == "COMPLETADA", 1), else_=0)).label('completadas'),
+        func.sum(
+            case(
+                ((Tarea.fecha_limite < hoy) & (Tarea.estado != "COMPLETADA"), 1),
+                else_=0
+            )
+        ).label('vencidas')
+    ).first()
+
+    total_tareas = resumen_tareas.total or 0
+    tareas_pendientes = resumen_tareas.pendientes or 0
+    tareas_en_progreso = resumen_tareas.en_progreso or 0
+    tareas_completadas = resumen_tareas.completadas or 0
+    tareas_vencidas = resumen_tareas.vencidas or 0
 
     ultimas_tareas = db.query(Tarea).order_by(Tarea.id.desc()).limit(10).all()
 
@@ -129,7 +139,6 @@ def obtener_resumen_panel(
             "total": total_miembros,
             "activos": miembros_activos,
             "inactivos": miembros_inactivos,
-            
         },
         "etiquetas": {
             "total": total_etiquetas,
@@ -166,7 +175,10 @@ def obtener_resumen_tiempo(
     ahora = datetime.now(TZ_PERU)
 
     # ⚠️ SIN filtro de "fin.is_not(None)" para incluir actividades en curso
-    query_base = db.query(TiempoRegistro).filter(
+    # OPTIMIZACIÓN: eager loading del proyecto y su cliente
+    query_base = db.query(TiempoRegistro).options(
+        joinedload(TiempoRegistro.proyecto).joinedload(Proyecto.cliente)
+    ).filter(
         TiempoRegistro.inicio >= inicio_dt,
         TiempoRegistro.inicio <= fin_dt
     )
@@ -265,8 +277,10 @@ def obtener_resumen_tiempo(
                 break
 
         if pid_top:
+            # OPTIMIZACIÓN: Usar joinedload para el cliente
             proyecto_top = (
                 db.query(Proyecto)
+                .options(joinedload(Proyecto.cliente))
                 .filter(Proyecto.id == pid_top)
                 .first()
             )
@@ -278,14 +292,6 @@ def obtener_resumen_tiempo(
                     cliente_obj = (
                         db.query(Cliente)
                         .filter(Cliente.id == proyecto_top.cliente_id)
-                        .first()
-                    )
-                    if cliente_obj:
-                        cliente_principal = cliente_obj.nombre
-                elif hasattr(proyecto_top, "id_cliente") and proyecto_top.id_cliente:
-                    cliente_obj = (
-                        db.query(Cliente)
-                        .filter(Cliente.id == proyecto_top.id_cliente)
                         .first()
                     )
                     if cliente_obj:
@@ -368,8 +374,11 @@ def obtener_actividad_equipo(
     ahora = datetime.now(TZ_PERU)
     limite_activo = ahora - timedelta(hours=4)
 
+    # 1. Traer todos los usuarios en 1 sola consulta
     usuarios = db.query(Usuario).all()
+    usuario_ids = [u.id for u in usuarios]
 
+    # 2. Registros de HOY para calcular totales por usuario (1 sola consulta)
     inicio_hoy = datetime.combine(ahora.date(), time.min, tzinfo=TZ_PERU)
     fin_hoy = datetime.combine(ahora.date(), time.max, tzinfo=TZ_PERU)
 
@@ -383,7 +392,6 @@ def obtener_actividad_equipo(
     )
 
     totales_por_usuario = {}
-
     for r in registros_hoy:
         uid = r.usuario_id
         totales_por_usuario[uid] = (
@@ -391,29 +399,60 @@ def obtener_actividad_equipo(
             + segundos_de_registro(r, ahora)
         )
 
+    # ============================================================
+    # OPTIMIZACIÓN CRÍTICA: Reemplazar el bucle N+1 con agregaciones SQL
+    # ============================================================
+
+    # 3. Último registro cerrado por usuario (1 sola consulta)
+    subq_max_fin = (
+        db.query(
+            TiempoRegistro.usuario_id,
+            func.max(TiempoRegistro.fin).label("max_fin")
+        )
+        .filter(
+            TiempoRegistro.usuario_id.in_(usuario_ids),
+            TiempoRegistro.fin.is_not(None)
+        )
+        .group_by(TiempoRegistro.usuario_id)
+        .subquery()
+    )
+
+    ultimos_cerrados = (
+        db.query(TiempoRegistro)
+        .options(joinedload(TiempoRegistro.proyecto))
+        .join(
+            subq_max_fin,
+            (TiempoRegistro.usuario_id == subq_max_fin.c.usuario_id)
+            & (TiempoRegistro.fin == subq_max_fin.c.max_fin)
+        )
+        .all()
+    )
+
+    ultimos_por_usuario = {r.usuario_id: r for r in ultimos_cerrados}
+
+    # 4. Registro activo por usuario (1 sola consulta)
+    activos = (
+        db.query(TiempoRegistro)
+        .options(joinedload(TiempoRegistro.proyecto))
+        .filter(
+            TiempoRegistro.usuario_id.in_(usuario_ids),
+            TiempoRegistro.fin.is_(None),
+            TiempoRegistro.inicio >= limite_activo
+        )
+        .all()
+    )
+
+    activos_por_usuario = {r.usuario_id: r for r in activos}
+
+    # ============================================================
+    # ARMAR LA RESPUESTA (ya sin consultas dentro del bucle)
+    # ============================================================
     miembros = []
 
     for u in usuarios:
 
-        ultimo_cerrado = (
-            db.query(TiempoRegistro)
-            .filter(
-                TiempoRegistro.usuario_id == u.id,
-                TiempoRegistro.fin.is_not(None)
-            )
-            .order_by(TiempoRegistro.fin.desc())
-            .first()
-        )
-
-        activo = (
-            db.query(TiempoRegistro)
-            .filter(
-                TiempoRegistro.usuario_id == u.id,
-                TiempoRegistro.fin.is_(None),
-                TiempoRegistro.inicio >= limite_activo
-            )
-            .first()
-        )
+        ultimo_cerrado = ultimos_por_usuario.get(u.id)
+        activo = activos_por_usuario.get(u.id)
 
         registro_ref = activo if activo else ultimo_cerrado
 
@@ -502,7 +541,7 @@ def obtener_actividad_equipo(
             "color_avatar": color_avatar,
             "email": u.email,
             "rol": u.rol,
-            "activo": u.activo,  
+            "activo": u.activo,
             "ultima_actividad": ultima_actividad,
             "ultimo_proyecto": ultimo_proyecto,
             "hora": hora_formateada,

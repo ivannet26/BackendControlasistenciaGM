@@ -1,27 +1,25 @@
 import secrets
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
-from equipo_models import Etiqueta, MiembroEquipo
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy import func, case
+
 from auditoria_helper import registrar_auditoria
 import schemas
 from database import get_db
 from models import Usuario
-from equipo_models import Etiqueta
+from equipo_models import Etiqueta, MiembroEquipo
 from proyecto_models import Proyecto
 from rastreador_models import Tarea, EnlaceRastreador, TiempoRegistro
 from security import get_usuario_actual, requiere_admin
-
 
 router = APIRouter(
     prefix="/rastreador",
     tags=["Rastreador"]
 )
 
-
 TZ_PERU = ZoneInfo("America/Lima")
-
 
 ESTADOS = {
     "PENDIENTE",
@@ -35,28 +33,38 @@ PRIORIDADES = {
     "ALTA"
 }
 
+# ============================================================
+# FUNCIONES AUXILIARES PARA EAGER LOADING (OPTIMIZACIÓN)
+# ============================================================
+
+def _opciones_tarea():
+    """Devuelve las opciones de eager loading para el modelo Tarea."""
+    return [
+        joinedload(Tarea.proyecto),
+        selectinload(Tarea.etiquetas),
+        selectinload(Tarea.miembros).joinedload(MiembroEquipo.usuario)
+    ]
+
+def _opciones_tiempo():
+    """Devuelve las opciones de eager loading para el modelo TiempoRegistro."""
+    return [
+        joinedload(TiempoRegistro.proyecto),
+        joinedload(TiempoRegistro.tarea)
+    ]
 
 # ============================================================
 # OBTENER TAREA
 # ============================================================
 
-def obtener_tarea_o_404(
-    db: Session,
-    tarea_id: int,
-    usuario_id: int
-):
-
-    tarea = db.query(Tarea).filter(
-        Tarea.id == tarea_id,
-        Tarea.usuario_id == usuario_id
-    ).first()
-
+def obtener_tarea_o_404(db: Session, tarea_id: int, usuario_id: int):
+    tarea = (
+        db.query(Tarea)
+        .options(*_opciones_tarea())
+        .filter(Tarea.id == tarea_id, Tarea.usuario_id == usuario_id)
+        .first()
+    )
     if not tarea:
-        raise HTTPException(
-            status_code=404,
-            detail="Tarea no encontrada"
-        )
-
+        raise HTTPException(status_code=404, detail="Tarea no encontrada")
     return tarea
 
 
@@ -126,8 +134,8 @@ def crear_tarea(
     )
 
     db.commit()
-    db.refresh(tarea)
-    return tarea
+    # OPTIMIZACIÓN: Recargar con eager loading para evitar N+1 al serializar
+    return obtener_tarea_o_404(db, tarea.id, usuario.id)
 
 # ============================================================
 # LISTAR TAREAS
@@ -142,9 +150,11 @@ def listar_tareas(
     db: Session = Depends(get_db),
     usuario=Depends(get_usuario_actual)
 ):
-    query = db.query(Tarea).filter(
+    # OPTIMIZACIÓN: Eager loading
+    query = db.query(Tarea).options(*_opciones_tarea()).filter(
         Tarea.usuario_id == usuario.id
     )
+    
     if estado:
         estado = estado.upper()
         if estado not in ESTADOS:
@@ -274,8 +284,8 @@ def actualizar_tarea(
     )
 
     db.commit()
-    db.refresh(tarea)
-    return tarea
+    # OPTIMIZACIÓN: Recargar con eager loading
+    return obtener_tarea_o_404(db, tarea.id, usuario.id)
 
 
 # ============================================================
@@ -340,11 +350,7 @@ def asignar_etiqueta_a_tarea(
     usuario=Depends(get_usuario_actual)
 ):
 
-    tarea = obtener_tarea_o_404(
-        db,
-        tarea_id,
-        usuario.id
-    )
+    tarea = obtener_tarea_o_404(db, tarea_id, usuario.id)
 
     etiqueta = db.query(Etiqueta).filter(
         Etiqueta.id == etiqueta_id
@@ -369,11 +375,8 @@ def asignar_etiqueta_a_tarea(
         )
 
     tarea.etiquetas.append(etiqueta)
-
     db.commit()
-    db.refresh(tarea)
-
-    return tarea
+    return tarea # Retornamos tarea directamente ya que las relaciones ya están cargadas
 
 
 @router.delete(
@@ -388,11 +391,7 @@ def desasignar_etiqueta_de_tarea(
     usuario=Depends(get_usuario_actual)
 ):
 
-    tarea = obtener_tarea_o_404(
-        db,
-        tarea_id,
-        usuario.id
-    )
+    tarea = obtener_tarea_o_404(db, tarea_id, usuario.id)
 
     etiqueta = db.query(Etiqueta).filter(
         Etiqueta.id == etiqueta_id
@@ -411,10 +410,7 @@ def desasignar_etiqueta_de_tarea(
         )
 
     tarea.etiquetas.remove(etiqueta)
-
     db.commit()
-    db.refresh(tarea)
-
     return tarea
 
 # ============================================================
@@ -433,11 +429,7 @@ def asignar_miembro_a_tarea(
     usuario=Depends(get_usuario_actual)
 ):
 
-    tarea = obtener_tarea_o_404(
-        db,
-        tarea_id,
-        usuario.id
-    )
+    tarea = obtener_tarea_o_404(db, tarea_id, usuario.id)
 
     miembro = db.query(MiembroEquipo).filter(
         MiembroEquipo.id == miembro_id
@@ -456,10 +448,7 @@ def asignar_miembro_a_tarea(
         )
 
     tarea.miembros.append(miembro)
-
     db.commit()
-    db.refresh(tarea)
-
     return tarea
 
 
@@ -475,11 +464,7 @@ def desasignar_miembro_de_tarea(
     usuario=Depends(get_usuario_actual)
 ):
 
-    tarea = obtener_tarea_o_404(
-        db,
-        tarea_id,
-        usuario.id
-    )
+    tarea = obtener_tarea_o_404(db, tarea_id, usuario.id)
 
     miembro = db.query(MiembroEquipo).filter(
         MiembroEquipo.id == miembro_id
@@ -498,11 +483,10 @@ def desasignar_miembro_de_tarea(
         )
 
     tarea.miembros.remove(miembro)
-
     db.commit()
-    db.refresh(tarea)
-
     return tarea
+
+
 # ============================================================
 # RESUMEN DEL RASTREADOR
 # ============================================================
@@ -515,29 +499,30 @@ def resumen(
     db: Session = Depends(get_db),
     usuario=Depends(get_usuario_actual)
 ):
+    # OPTIMIZACIÓN: Agregación en SQL en lugar de traer todo a Python
+    hoy = datetime.now(TZ_PERU).date()
+    
+    resultado = db.query(
+        func.count(Tarea.id).label('total'),
+        func.sum(case((Tarea.estado == "COMPLETADA", 1), else_=0)).label('completadas'),
+        func.sum(case((Tarea.estado == "EN_PROGRESO", 1), else_=0)).label('en_progreso'),
+        func.sum(case((Tarea.estado == "PENDIENTE", 1), else_=0)).label('pendientes'),
+        func.sum(
+            case(
+                (Tarea.estado != "COMPLETADA", 
+                 case((Tarea.fecha_limite < hoy, 1), else_=0)), 
+                else_=0
+            )
+        ).label('vencidas')
+    ).filter(Tarea.usuario_id == usuario.id).first()
 
-    tareas = db.query(Tarea).filter(
-        Tarea.usuario_id == usuario.id
-    ).all()
+    total = resultado.total or 0
+    completadas = resultado.completadas or 0
+    en_progreso = resultado.en_progreso or 0
+    pendientes = resultado.pendientes or 0
+    vencidas = resultado.vencidas or 0
 
-    total = len(tareas)
-
-    completadas = sum(t.estado == "COMPLETADA" for t in tareas)
-    en_progreso = sum(t.estado == "EN_PROGRESO" for t in tareas)
-    pendientes = sum(t.estado == "PENDIENTE" for t in tareas)
-
-    vencidas = sum(
-        t.estado != "COMPLETADA"
-        and t.fecha_limite is not None
-        and t.fecha_limite < datetime.now(TZ_PERU).date()
-        for t in tareas
-    )
-
-    avance = (
-        round((completadas / total) * 100, 2)
-        if total
-        else 0
-    )
+    avance = round((completadas / total) * 100, 2) if total else 0
 
     return {
         "total": total,
@@ -569,13 +554,11 @@ def crear_enlace(
     ).first()
 
     if not enlace:
-
         enlace = EnlaceRastreador(
             usuario_id=usuario.id,
             token=secrets.token_urlsafe(32),
             activo=True
         )
-
         db.add(enlace)
         db.commit()
         db.refresh(enlace)
@@ -645,7 +628,8 @@ def consultar_rastreador_publico(
             detail="Usuario no encontrado"
         )
 
-    tareas = db.query(Tarea).filter(
+    # OPTIMIZACIÓN: Eager loading
+    tareas = db.query(Tarea).options(*_opciones_tarea()).filter(
         Tarea.usuario_id == enlace.usuario_id
     ).order_by(
         Tarea.fecha_limite.is_(None),
@@ -653,24 +637,29 @@ def consultar_rastreador_publico(
         Tarea.id.desc()
     ).all()
 
-    total = len(tareas)
+    # OPTIMIZACIÓN: Agregación en SQL
+    hoy = datetime.now(TZ_PERU).date()
+    resultado = db.query(
+        func.count(Tarea.id).label('total'),
+        func.sum(case((Tarea.estado == "COMPLETADA", 1), else_=0)).label('completadas'),
+        func.sum(case((Tarea.estado == "EN_PROGRESO", 1), else_=0)).label('en_progreso'),
+        func.sum(case((Tarea.estado == "PENDIENTE", 1), else_=0)).label('pendientes'),
+        func.sum(
+            case(
+                (Tarea.estado != "COMPLETADA", 
+                 case((Tarea.fecha_limite < hoy, 1), else_=0)), 
+                else_=0
+            )
+        ).label('vencidas')
+    ).filter(Tarea.usuario_id == enlace.usuario_id).first()
 
-    completadas = sum(t.estado == "COMPLETADA" for t in tareas)
-    pendientes = sum(t.estado == "PENDIENTE" for t in tareas)
-    en_progreso = sum(t.estado == "EN_PROGRESO" for t in tareas)
+    total = resultado.total or 0
+    completadas = resultado.completadas or 0
+    en_progreso = resultado.en_progreso or 0
+    pendientes = resultado.pendientes or 0
+    vencidas = resultado.vencidas or 0
 
-    vencidas = sum(
-        t.estado != "COMPLETADA"
-        and t.fecha_limite is not None
-        and t.fecha_limite < datetime.now(TZ_PERU).date()
-        for t in tareas
-    )
-
-    avance = (
-        round((completadas / total) * 100, 2)
-        if total
-        else 0
-    )
+    avance = round((completadas / total) * 100, 2) if total else 0
 
     return {
         "nombre": f"{usuario.nombre} {usuario.apellido}",
@@ -771,8 +760,9 @@ def iniciar_temporizador(
 
     db.add(nuevo_registro)
     db.commit()
-    db.refresh(nuevo_registro)
-    return nuevo_registro
+    
+    # OPTIMIZACIÓN: Retornar con eager loading
+    return db.query(TiempoRegistro).options(*_opciones_tiempo()).filter(TiempoRegistro.id == nuevo_registro.id).first()
 
 
 # ============================================================
@@ -827,8 +817,9 @@ def detener_temporizador(
     registro.duracion_segundos = segundos_transcurridos
 
     db.commit()
-    db.refresh(registro)
-    return registro
+    
+    # OPTIMIZACIÓN: Retornar con eager loading
+    return db.query(TiempoRegistro).options(*_opciones_tiempo()).filter(TiempoRegistro.id == registro.id).first()
 
 
 # ============================================================
@@ -843,8 +834,10 @@ def obtener_temporizador_activo(
     db: Session = Depends(get_db),
     usuario=Depends(get_usuario_actual)
 ):
+    # OPTIMIZACIÓN: Eager loading
     return (
         db.query(TiempoRegistro)
+        .options(*_opciones_tiempo())
         .filter(
             TiempoRegistro.usuario_id == usuario.id,
             TiempoRegistro.fin.is_(None)
@@ -876,7 +869,8 @@ def historial_tiempos(
                 detail="fecha_desde no puede ser mayor que fecha_hasta"
             )
 
-    query = db.query(TiempoRegistro).filter(
+    # OPTIMIZACIÓN: Eager loading
+    query = db.query(TiempoRegistro).options(*_opciones_tiempo()).filter(
         TiempoRegistro.usuario_id == usuario.id,
         TiempoRegistro.fin.is_not(None)
     )

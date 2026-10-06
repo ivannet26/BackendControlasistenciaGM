@@ -6,6 +6,7 @@ from fastapi import (
     status,
     Request
 )
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 from typing import List, Optional
@@ -255,7 +256,9 @@ def listar_proyectos(
             Proyecto.cliente_id == cliente_id
         )
 
-    proyectos = query.order_by(
+    proyectos = query.options(
+        joinedload(Proyecto.cliente)
+    ).order_by(
         Proyecto.nombre.asc()
     ).all()
 

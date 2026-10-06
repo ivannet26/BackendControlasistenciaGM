@@ -55,6 +55,14 @@ def login(datos: schemas.LoginRequest, db: Session = Depends(get_db)):
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # verificar si está activo
+    if not usuario.activo:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tu cuenta está desactivada.",
+        )
+
+    # verificar contraseña
     if es_texto_plano(usuario.password_hash):
         if datos.password != usuario.password_hash:
             raise HTTPException(
@@ -71,12 +79,6 @@ def login(datos: schemas.LoginRequest, db: Session = Depends(get_db)):
                 detail="Email o contraseña incorrectos",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-
-    if not usuario.activo:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="La cuenta está desactivada",
-        )
 
     token = crear_token(
         data={
@@ -98,7 +100,6 @@ def login(datos: schemas.LoginRequest, db: Session = Depends(get_db)):
             "rol": usuario.rol
         }
     }
-
 
 @router.get("/me", response_model=schemas.UsuarioOut)
 def perfil_actual(usuario: models.Usuario = Depends(get_usuario_actual)):

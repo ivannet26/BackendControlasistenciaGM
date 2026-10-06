@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
-
+from sqlalchemy.orm import Session, joinedload, selectinload
 from database import get_db
 from models import Usuario
 from equipo_models import Grupo, MiembroEquipo, Etiqueta
@@ -122,9 +122,9 @@ def listar_grupos(
     db: Session = Depends(get_db),
     _: Usuario = Depends(get_usuario_actual),
 ):
-    """Devuelve todos los grupos con sus miembros."""
-
-    grupos = db.query(Grupo).order_by(Grupo.nombre).all()
+    grupos = db.query(Grupo).options(
+        selectinload(Grupo.miembros).joinedload(MiembroEquipo.usuario)
+    ).order_by(Grupo.nombre).all()
 
     return [
         {
@@ -148,8 +148,10 @@ def obtener_grupo(
     db: Session = Depends(get_db),
     _: Usuario = Depends(get_usuario_actual),
 ):
-    """Devuelve un grupo con la lista de nombres de sus miembros."""
-    grupo = db.query(Grupo).filter(Grupo.id == grupo_id).first()
+    grupo = db.query(Grupo).options(
+        selectinload(Grupo.miembros).joinedload(MiembroEquipo.usuario)
+    ).filter(Grupo.id == grupo_id).first()
+    
     if not grupo:
         raise HTTPException(status_code=404, detail="Grupo no encontrado")
 
@@ -245,11 +247,11 @@ def listar_miembros(
     db: Session = Depends(get_db),
     _: Usuario = Depends(get_usuario_actual),
 ):
-    """
-    Lista todos los miembros del equipo.
-    Se puede filtrar por estado, tipo_usuario y/o grupo_id.
-    """
-    query = db.query(MiembroEquipo)
+    query = db.query(MiembroEquipo).options(
+        joinedload(MiembroEquipo.usuario), 
+        joinedload(MiembroEquipo.grupo),  
+        selectinload(MiembroEquipo.etiquetas) 
+    )
 
     if estado:
         query = query.filter(MiembroEquipo.estado == estado.upper())
@@ -268,8 +270,12 @@ def obtener_miembro(
     db: Session = Depends(get_db),
     _: Usuario = Depends(get_usuario_actual),
 ):
-    """Devuelve el detalle de un miembro por su ID."""
-    miembro = db.query(MiembroEquipo).filter(MiembroEquipo.id == miembro_id).first()
+    miembro = db.query(MiembroEquipo).options(
+        joinedload(MiembroEquipo.usuario),
+        joinedload(MiembroEquipo.grupo),
+        selectinload(MiembroEquipo.etiquetas)
+    ).filter(MiembroEquipo.id == miembro_id).first()
+    
     if not miembro:
         raise HTTPException(status_code=404, detail="Miembro no encontrado")
     return _construir_miembro_out(miembro)
