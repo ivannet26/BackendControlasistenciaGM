@@ -1,119 +1,113 @@
-import os
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import timedelta
+from typing import List
 
-from dotenv import load_dotenv
-from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
-from passlib.context import CryptContext
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 import models
 import schemas
+from security import (
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    crear_token,
+    get_usuario_actual,
+    hash_password,
+    verificar_password,
+    es_texto_plano,
+)
 from database import get_db
 
-load_dotenv()
 
-# ── Configuración JWT ─────────────────────────────────────────────────────────
-# SECRET_KEY: clave secreta para firmar los tokens. NUNCA la expongas.
-SECRET_KEY  = os.getenv("SECRET_KEY", "cambia-esta-clave-en-produccion-por-favor")
-ALGORITHM   = "HS256"
-# El token expira en 8 horas (ajusta según necesiten)
-ACCESS_TOKEN_EXPIRE_MINUTES = 480
+router = APIRouter(prefix="/auth", tags=["Autenticación"])
 
-# ── Hashing de contraseñas ────────────────────────────────────────────────────
-# bcrypt convierte "mi_password" → "$2b$12$..." (no reversible)
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-# Le dice a FastAPI dónde esperar el token (header: Authorization: Bearer <token>)
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+ROLES_ADMIN = {"ADMINISTRACION", "ADMINISTRADOR", "ADMIN"}
 
 
-# ── Funciones de password ─────────────────────────────────────────────────────
+# ── POST /auth/registro ───────────────────────────────────────────────────────
 
-def hash_password(password: str) -> str:
-    """Convierte contraseña en texto plano a hash bcrypt."""
-    return pwd_context.hash(password)
+@router.post("/registro", response_model=schemas.UsuarioOut, status_code=status.HTTP_201_CREATED)
+def registro(datos: schemas.UsuarioRegistro, db: Session = Depends(get_db)):
+    existe = db.query(models.Usuario).filter(models.Usuario.email == datos.email).first()
+    if existe:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ya existe un usuario con ese email",
+        )
 
-
-def verificar_password(password_plano: str, password_hash: str) -> bool:
-    """Compara contraseña ingresada contra el hash guardado en BD."""
-    return pwd_context.verify(password_plano, password_hash)
-
-
-# ── Funciones de JWT ──────────────────────────────────────────────────────────
-
-def crear_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    """
-    Crea un JWT firmado con los datos del usuario.
-    data: dict con lo que quieres guardar en el token (email, rol, id)
-    """
-    payload = data.copy()
-    expira = datetime.now(timezone.utc) + (
-        expires_delta if expires_delta else timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    nuevo_usuario = models.Usuario(
+        nombre=datos.nombre,
+        apellido=datos.apellido,
+        email=datos.email,
+        password_hash=hash_password(datos.password),
+        rol="PRACTICANTE",
+        activo=True
     )
-    payload.update({"exp": expira})
-    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+    db.add(nuevo_usuario)
+    db.commit()
+    db.refresh(nuevo_usuario)
+    return nuevo_usuario
 
 
-def verificar_token(token: str) -> schemas.TokenData:
-    """
-    Decodifica y valida el JWT.
-    Lanza excepción si el token es inválido o expiró.
-    """
-    credenciales_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="No se pudo validar el token",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        rol: str   = payload.get("rol")
-        uid: int   = payload.get("id")
-        if email is None:
-            raise credenciales_exception
-        return schemas.TokenData(email=email, rol=rol, usuario_id=uid)
-    except JWTError:
-        raise credenciales_exception
+# ── POST /auth/login ──────────────────────────────────────────────────────────
 
+@router.post("/login", response_model=schemas.Token)
+def login(datos: schemas.LoginRequest, db: Session = Depends(get_db)):
+    usuario = db.query(models.Usuario).filter(models.Usuario.email == datos.email).first()
 
-# ── Dependencia: usuario actual ───────────────────────────────────────────────
-
-def get_usuario_actual(
-    token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db)
-) -> models.Usuario:
-    """
-    Dependencia de FastAPI: extrae y valida el token, devuelve el usuario de BD.
-    Úsala en cualquier endpoint que requiera estar autenticado:
-        @router.get("/protegido")
-        def ruta(usuario = Depends(get_usuario_actual)):
-    """
-    token_data = verificar_token(token)
-    usuario = db.query(models.Usuario).filter(
-        models.Usuario.email == token_data.email
-    ).first()
-    if usuario is None or not usuario.activo:
+    if not usuario:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Usuario no encontrado o inactivo",
+            detail="Email o contraseña incorrectos",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-    return usuario
 
-
-def requiere_rol(*roles_permitidos: str):
-    """
-    Dependencia de rol. Uso:
-        @router.get("/solo-admin")
-        def ruta(usuario = Depends(requiere_rol("admin"))):
-    """
-    def verificar(usuario: models.Usuario = Depends(get_usuario_actual)):
-        if usuario.rol.nombre not in roles_permitidos:
+    if es_texto_plano(usuario.password_hash):
+        if datos.password != usuario.password_hash:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Se requiere rol: {', '.join(roles_permitidos)}",
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Email o contraseña incorrectos",
+                headers={"WWW-Authenticate": "Bearer"},
             )
-        return usuario
-    return verificar
+        usuario.password_hash = hash_password(datos.password)
+        db.commit()
+    else:
+        if not verificar_password(datos.password, usuario.password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Email o contraseña incorrectos",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+    if not usuario.activo:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="La cuenta está desactivada",
+        )
+
+    token = crear_token(
+        data={
+            "sub": usuario.email,
+            "id": usuario.id,
+            "rol": usuario.rol,
+        },
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "usuario": {
+            "id": usuario.id,
+            "nombre": usuario.nombre,
+            "apellido": usuario.apellido,
+            "email": usuario.email,
+            "rol": usuario.rol
+        }
+    }
+
+
+# ── GET /auth/me ──────────────────────────────────────────────────────────────
+
+@router.get("/me", response_model=schemas.UsuarioOut)
+def perfil_actual(usuario: models.Usuario = Depends(get_usuario_actual)):
+    return usuario

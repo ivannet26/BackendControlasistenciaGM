@@ -12,14 +12,15 @@ from routers import etiqueta as etiqueta_router
 from routers import proyecto as proyecto_router
 from routers import panel as panel_router
 from routers import informes as informes_router
+from routers import auditoria as auditoria_router
+import auditoria_models  # noqa: F401
 import rastreador_models  # noqa: F401
 import equipo_models  # noqa: F401
 import cliente_models  # noqa: F401
 import proyecto_models  # noqa: F401
-import models  # noqa: F401
 import proyecto_auditoria_models  # noqa: F401
-import auditoria_models  # noqa: F401
-import sesion_models  # noqa: F401
+
+
 
 
 
@@ -61,6 +62,7 @@ app.include_router(etiqueta_router.router)
 app.include_router(proyecto_router.router)
 app.include_router(panel_router.router)
 app.include_router(informes_router.router)
+app.include_router(auditoria_router.router)
 
 
 

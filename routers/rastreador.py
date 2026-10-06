@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 from equipo_models import Etiqueta, MiembroEquipo
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-
+from auditoria_helper import registrar_auditoria
 import schemas
 from database import get_db
 from models import Usuario
@@ -74,15 +74,10 @@ def crear_tarea(
     usuario=Depends(get_usuario_actual)
 ):
     if datos.estado not in ESTADOS:
-        raise HTTPException(
-            status_code=400,
-            detail="Estado inválido"
-        )
+        raise HTTPException(status_code=400, detail="Estado inválido")
+
     if datos.prioridad not in PRIORIDADES:
-        raise HTTPException(
-            status_code=400,
-            detail="Prioridad inválida"
-        )
+        raise HTTPException(status_code=400, detail="Prioridad inválida")
 
     proyecto = (
         db.query(Proyecto)
@@ -90,21 +85,12 @@ def crear_tarea(
         .first()
     )
     if not proyecto:
-        raise HTTPException(
-            status_code=404,
-            detail="Proyecto no encontrado"
-        )
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     if proyecto.archivado:
-        raise HTTPException(
-            status_code=400,
-            detail="No se puede asignar un proyecto archivado"
-        )
+        raise HTTPException(status_code=400, detail="No se puede asignar un proyecto archivado")
 
     datos_dict = datos.model_dump(exclude={"etiqueta_ids"})
-    tarea = Tarea(
-        usuario_id=usuario.id,
-        **datos_dict
-    )
+    tarea = Tarea(usuario_id=usuario.id, **datos_dict)
 
     if datos.etiqueta_ids:
         etiquetas = (
@@ -118,10 +104,30 @@ def crear_tarea(
         tarea.etiquetas = etiquetas
 
     db.add(tarea)
+    db.flush()
+
+    # 🔥 AUDITORÍA
+    registrar_auditoria(
+        db=db,
+        usuario=usuario,
+        accion="CREAR",
+        entidad="TAREA",
+        entidad_id=tarea.id,
+        entidad_nombre=tarea.titulo,
+        proyecto_id=proyecto.id,
+        proyecto_nombre=proyecto.nombre,
+        detalle=f"Creó la tarea '{tarea.titulo}' en el proyecto '{proyecto.nombre}'",
+        datos_nuevos={
+            "titulo": tarea.titulo,
+            "estado": tarea.estado,
+            "prioridad": tarea.prioridad,
+            "proyecto_id": tarea.proyecto_id,
+        },
+    )
+
     db.commit()
     db.refresh(tarea)
     return tarea
-
 
 # ============================================================
 # LISTAR TAREAS
@@ -184,37 +190,31 @@ def obtener_tarea(
 # ============================================================
 # ACTUALIZAR TAREA
 # ============================================================
-@router.put(
-    "/tareas/{tarea_id}",
-    response_model=schemas.TareaOut
-)
+@router.put("/tareas/{tarea_id}", response_model=schemas.TareaOut)
 def actualizar_tarea(
     tarea_id: int,
     datos: schemas.TareaUpdate,
     db: Session = Depends(get_db),
     usuario=Depends(get_usuario_actual)
 ):
-    tarea = obtener_tarea_o_404(
-        db,
-        tarea_id,
-        usuario.id
-    )
-    cambios = datos.model_dump(
-        exclude_unset=True
-    )
+    tarea = obtener_tarea_o_404(db, tarea_id, usuario.id)
 
-    if "estado" in cambios:
-        if cambios["estado"] not in ESTADOS:
-            raise HTTPException(
-                status_code=400,
-                detail="Estado inválido"
-            )
-    if "prioridad" in cambios:
-        if cambios["prioridad"] not in PRIORIDADES:
-            raise HTTPException(
-                status_code=400,
-                detail="Prioridad inválida"
-            )
+    # 📸 Snapshot ANTES
+    snapshot_anterior = {
+        "titulo": tarea.titulo,
+        "estado": tarea.estado,
+        "prioridad": tarea.prioridad,
+        "descripcion": tarea.descripcion,
+        "proyecto_id": tarea.proyecto_id,
+    }
+
+    cambios = datos.model_dump(exclude_unset=True)
+
+    if "estado" in cambios and cambios["estado"] not in ESTADOS:
+        raise HTTPException(status_code=400, detail="Estado inválido")
+
+    if "prioridad" in cambios and cambios["prioridad"] not in PRIORIDADES:
+        raise HTTPException(status_code=400, detail="Prioridad inválida")
 
     if "proyecto_id" in cambios and cambios["proyecto_id"] is not None:
         proyecto = (
@@ -223,15 +223,9 @@ def actualizar_tarea(
             .first()
         )
         if not proyecto:
-            raise HTTPException(
-                status_code=404,
-                detail="Proyecto no encontrado"
-            )
+            raise HTTPException(status_code=404, detail="Proyecto no encontrado")
         if proyecto.archivado:
-            raise HTTPException(
-                status_code=400,
-                detail="No se puede asignar un proyecto archivado"
-            )
+            raise HTTPException(status_code=400, detail="No se puede asignar un proyecto archivado")
 
     if "etiqueta_ids" in cambios:
         ids_etiquetas = cambios.pop("etiqueta_ids")
@@ -247,11 +241,37 @@ def actualizar_tarea(
             tarea.etiquetas = etiquetas
 
     for campo, valor in cambios.items():
-        setattr(
-            tarea,
-            campo,
-            valor
+        setattr(tarea, campo, valor)
+
+    db.flush()
+
+    proyecto_ref = None
+    if tarea.proyecto_id:
+        proyecto_ref = (
+            db.query(Proyecto)
+            .filter(Proyecto.id == tarea.proyecto_id)
+            .first()
         )
+
+    # 🔥 AUDITORÍA
+    registrar_auditoria(
+        db=db,
+        usuario=usuario,
+        accion="EDITAR",
+        entidad="TAREA",
+        entidad_id=tarea.id,
+        entidad_nombre=tarea.titulo,
+        proyecto_id=tarea.proyecto_id,
+        proyecto_nombre=proyecto_ref.nombre if proyecto_ref else None,
+        detalle=f"Editó la tarea '{tarea.titulo}'",
+        datos_anteriores=snapshot_anterior,
+        datos_nuevos={
+            "titulo": tarea.titulo,
+            "estado": tarea.estado,
+            "prioridad": tarea.prioridad,
+            "proyecto_id": tarea.proyecto_id,
+        },
+    )
 
     db.commit()
     db.refresh(tarea)
@@ -262,25 +282,45 @@ def actualizar_tarea(
 # ELIMINAR TAREA
 # ============================================================
 
-@router.delete(
-    "/tareas/{tarea_id}",
-    status_code=status.HTTP_204_NO_CONTENT
-)
+@router.delete("/tareas/{tarea_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_tarea(
     tarea_id: int,
     db: Session = Depends(get_db),
     usuario=Depends(get_usuario_actual)
 ):
+    tarea = obtener_tarea_o_404(db, tarea_id, usuario.id)
 
-    tarea = obtener_tarea_o_404(
-        db,
-        tarea_id,
-        usuario.id
+    snapshot_anterior = {
+        "titulo": tarea.titulo,
+        "estado": tarea.estado,
+        "prioridad": tarea.prioridad,
+        "proyecto_id": tarea.proyecto_id,
+    }
+
+    proyecto_ref = None
+    if tarea.proyecto_id:
+        proyecto_ref = (
+            db.query(Proyecto)
+            .filter(Proyecto.id == tarea.proyecto_id)
+            .first()
+        )
+
+    # 🔥 AUDITORÍA
+    registrar_auditoria(
+        db=db,
+        usuario=usuario,
+        accion="ELIMINAR",
+        entidad="TAREA",
+        entidad_id=tarea.id,
+        entidad_nombre=tarea.titulo,
+        proyecto_id=tarea.proyecto_id,
+        proyecto_nombre=proyecto_ref.nombre if proyecto_ref else None,
+        detalle=f"Eliminó la tarea '{tarea.titulo}'",
+        datos_anteriores=snapshot_anterior,
     )
 
     db.delete(tarea)
     db.commit()
-
     return None
 
 

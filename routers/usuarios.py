@@ -14,6 +14,7 @@ from database import get_db
 from models import Usuario
 from rastreador_models import TiempoRegistro
 from security import hash_password, requiere_admin
+from auditoria_helper import registrar_auditoria
 
 
 TZ_PERU = ZoneInfo("America/Lima")
@@ -29,7 +30,6 @@ ROLES_VALIDOS = {
     "ADMINISTRACION",
 }
 
-# ADMINISTRADOR y ADMINISTRACION tienen los mismos permisos
 ROLES_ADMIN = {"ADMINISTRADOR", "ADMINISTRACION"}
 
 ROL_POR_DEFECTO = "PRACTICANTE"
@@ -124,7 +124,6 @@ def listar_usuarios(
             )
         )
 
-    # Los más nuevos primero
     return query.order_by(Usuario.id.desc()).all()
 
 
@@ -168,6 +167,25 @@ def crear_usuario(
     )
 
     db.add(usuario)
+    db.flush()
+
+    registrar_auditoria(
+        db=db,
+        usuario=admin,
+        accion="CREAR",
+        entidad="USUARIO",
+        entidad_id=usuario.id,
+        entidad_nombre=f"{usuario.nombre} {usuario.apellido}",
+        detalle=f"Creó al usuario '{usuario.nombre} {usuario.apellido}' con rol {usuario.rol}",
+        datos_nuevos={
+            "nombre": usuario.nombre,
+            "apellido": usuario.apellido,
+            "email": usuario.email,
+            "rol": usuario.rol,
+            "activo": usuario.activo,
+        },
+    )
+
     db.commit()
     db.refresh(usuario)
 
@@ -188,7 +206,6 @@ def editar_usuario(
     usuario = _obtener_usuario_o_404(db, usuario_id)
     cambios = datos.model_dump(exclude_unset=True)
 
-    # Un admin no puede quitarse a sí mismo el acceso o el rol
     if usuario.id == admin.id:
         if cambios.get("activo") is False:
             raise HTTPException(status_code=400, detail="No puedes desactivar tu propia cuenta")
@@ -198,6 +215,15 @@ def editar_usuario(
                     status_code=400,
                     detail="No puedes quitarte tu propio rol de administrador",
                 )
+
+    # Snapshot ANTES
+    snapshot_anterior = {
+        "nombre": usuario.nombre,
+        "apellido": usuario.apellido,
+        "email": usuario.email,
+        "rol": usuario.rol,
+        "activo": usuario.activo,
+    }
 
     if cambios.get("email") is not None:
         if _email_en_uso(db, cambios["email"], excluir_id=usuario.id):
@@ -219,6 +245,26 @@ def editar_usuario(
     if cambios.get("password"):
         usuario.password_hash = hash_password(cambios["password"])
 
+    db.flush()
+
+    registrar_auditoria(
+        db=db,
+        usuario=admin,
+        accion="EDITAR",
+        entidad="USUARIO",
+        entidad_id=usuario.id,
+        entidad_nombre=f"{usuario.nombre} {usuario.apellido}",
+        detalle=f"Editó al usuario '{usuario.nombre} {usuario.apellido}'",
+        datos_anteriores=snapshot_anterior,
+        datos_nuevos={
+            "nombre": usuario.nombre,
+            "apellido": usuario.apellido,
+            "email": usuario.email,
+            "rol": usuario.rol,
+            "activo": usuario.activo,
+        },
+    )
+
     db.commit()
     db.refresh(usuario)
 
@@ -226,7 +272,7 @@ def editar_usuario(
 
 
 # ============================================================
-# DESACTIVAR (BAJA LÓGICA) - cierra rastreador y bloquea sesión
+# DESACTIVAR (BAJA LÓGICA)
 # ============================================================
 
 @router.patch("/{usuario_id}/desactivar", response_model=schemas.UsuarioOut)
@@ -243,11 +289,23 @@ def desactivar_usuario(
     if not usuario.activo:
         raise HTTPException(status_code=400, detail="El usuario ya está desactivado")
 
-    # 1. Cerrar todos los timers abiertos (igual que el /deslogear del panel)
+    # 1. Cerrar timers abiertos del usuario (cierra el rastreador si está corriendo)
     _cerrar_timers_abiertos(db, usuario.id)
 
     # 2. Marcar como inactivo
     usuario.activo = False
+
+    db.flush()
+
+    registrar_auditoria(
+        db=db,
+        usuario=admin,
+        accion="DESACTIVAR",
+        entidad="USUARIO",
+        entidad_id=usuario.id,
+        entidad_nombre=f"{usuario.nombre} {usuario.apellido}",
+        detalle=f"Desactivó al usuario '{usuario.nombre} {usuario.apellido}'",
+    )
 
     db.commit()
     db.refresh(usuario)
@@ -271,6 +329,18 @@ def activar_usuario(
         raise HTTPException(status_code=400, detail="El usuario ya está activo")
 
     usuario.activo = True
+    db.flush()
+
+    registrar_auditoria(
+        db=db,
+        usuario=admin,
+        accion="ACTIVAR",
+        entidad="USUARIO",
+        entidad_id=usuario.id,
+        entidad_nombre=f"{usuario.nombre} {usuario.apellido}",
+        detalle=f"Reactivó al usuario '{usuario.nombre} {usuario.apellido}'",
+    )
+
     db.commit()
     db.refresh(usuario)
 
@@ -293,12 +363,28 @@ def eliminar_usuario(
         raise HTTPException(status_code=400, detail="No puedes eliminar tu propia cuenta")
 
     try:
-        # Cerrar timers abiertos antes de borrar
         _cerrar_timers_abiertos(db, usuario.id)
+
+        # Auditoría ANTES de borrar
+        registrar_auditoria(
+            db=db,
+            usuario=admin,
+            accion="ELIMINAR",
+            entidad="USUARIO",
+            entidad_id=usuario.id,
+            entidad_nombre=f"{usuario.nombre} {usuario.apellido}",
+            detalle=f"Eliminó permanentemente al usuario '{usuario.nombre} {usuario.apellido}'",
+            datos_anteriores={
+                "nombre": usuario.nombre,
+                "apellido": usuario.apellido,
+                "email": usuario.email,
+                "rol": usuario.rol,
+            },
+        )
 
         db.delete(usuario)
         db.commit()
-    except Exception:
+    except Exception as e:
         db.rollback()
         raise HTTPException(
             status_code=409,

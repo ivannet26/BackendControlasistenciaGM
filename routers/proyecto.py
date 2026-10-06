@@ -16,7 +16,7 @@ from cliente_models import Cliente
 from proyecto_models import Proyecto
 from proyecto_auditoria_models import ProyectoAuditoria
 from rastreador_models import TiempoRegistro
-from auditoria_models import AuditoriaProyecto
+from proyecto_auditoria_models import ProyectoAuditoria
 from proyecto_schemas import (
     ProyectoCrear,
     ProyectoEditar,

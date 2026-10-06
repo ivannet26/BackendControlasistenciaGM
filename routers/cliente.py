@@ -6,15 +6,13 @@ from database import get_db
 from models import Usuario
 from cliente_models import Cliente
 from cliente_schemas import ClienteCrear, ClienteEditar, ClienteOut
-from security import get_usuario_actual
+from security import get_usuario_actual, requiere_admin
+from auditoria_helper import registrar_auditoria
 
 router = APIRouter(prefix="/clientes", tags=["Clientes"])
 
 
-# ── Función auxiliar ──────────────────────────────────────────────────────────
-
 def _construir_cliente_out(cliente: Cliente) -> dict:
-    """Convierte el campo destinatarios_cc de string a lista al responder."""
     cc_raw = cliente.destinatarios_cc or ""
     cc_lista = [c.strip() for c in cc_raw.split(",") if c.strip()]
     return {
@@ -31,37 +29,36 @@ def _construir_cliente_out(cliente: Cliente) -> dict:
     }
 
 
+def _snapshot_cliente(cliente: Cliente) -> dict:
+    return {
+        "nombre": cliente.nombre,
+        "email": cliente.email,
+        "destinatarios_cc": cliente.destinatarios_cc,
+        "direccion": cliente.direccion,
+        "nota": cliente.nota,
+        "moneda": cliente.moneda,
+        "archivado": cliente.archivado,
+    }
+
+
 # ════════════════════════════════════════════════════════════════════════════════
-# LISTAR
+# LISTAR (cualquier usuario logueado)
 # ════════════════════════════════════════════════════════════════════════════════
 
 @router.get("", response_model=List[ClienteOut])
 def listar_clientes(
-    estado: Optional[str] = Query(
-        None,
-        description="Filtro: 'activo', 'archivado' o 'todo'. Por defecto devuelve activos.",
-    ),
-    nombre: Optional[str] = Query(None, description="Buscar por nombre (parcial)"),
+    estado: Optional[str] = Query(None),
+    nombre: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _: Usuario = Depends(get_usuario_actual),
 ):
-    """
-    Lista clientes con filtros opcionales.
-    - estado=activo → solo no archivados (default)
-    - estado=archivado → solo archivados
-    - estado=todo → todos
-    - nombre → búsqueda parcial por nombre
-    """
     query = db.query(Cliente)
 
-    # Filtro de estado
     if estado is None or estado.lower() == "activo":
         query = query.filter(Cliente.archivado == False)
     elif estado.lower() == "archivado":
         query = query.filter(Cliente.archivado == True)
-    # "todo" no aplica filtro adicional
 
-    # Búsqueda por nombre
     if nombre:
         query = query.filter(Cliente.nombre.ilike(f"%{nombre}%"))
 
@@ -70,7 +67,7 @@ def listar_clientes(
 
 
 # ════════════════════════════════════════════════════════════════════════════════
-# OBTENER UNO
+# OBTENER UNO (cualquier usuario logueado)
 # ════════════════════════════════════════════════════════════════════════════════
 
 @router.get("/{cliente_id}", response_model=ClienteOut)
@@ -79,7 +76,6 @@ def obtener_cliente(
     db: Session = Depends(get_db),
     _: Usuario = Depends(get_usuario_actual),
 ):
-    """Devuelve el detalle de un cliente por su ID."""
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
@@ -87,17 +83,15 @@ def obtener_cliente(
 
 
 # ════════════════════════════════════════════════════════════════════════════════
-# CREAR
+# CREAR (solo admin)
 # ════════════════════════════════════════════════════════════════════════════════
 
 @router.post("", response_model=ClienteOut, status_code=status.HTTP_201_CREATED)
 def crear_cliente(
     datos: ClienteCrear,
     db: Session = Depends(get_db),
-    _: Usuario = Depends(get_usuario_actual),
+    usuario: Usuario = Depends(requiere_admin),
 ):
-    """Crea un nuevo cliente."""
-    # Guardar destinatarios_cc como string separado por comas
     cc_str = ",".join(datos.destinatarios_cc) if datos.destinatarios_cc else None
 
     cliente = Cliente(
@@ -109,13 +103,26 @@ def crear_cliente(
         moneda=datos.moneda.upper(),
     )
     db.add(cliente)
+    db.flush()
+
+    registrar_auditoria(
+        db=db,
+        usuario=usuario,
+        accion="CREAR",
+        entidad="CLIENTE",
+        entidad_id=cliente.id,
+        entidad_nombre=cliente.nombre,
+        detalle=f"Creó el cliente '{cliente.nombre}'",
+        datos_nuevos=_snapshot_cliente(cliente),
+    )
+
     db.commit()
     db.refresh(cliente)
     return _construir_cliente_out(cliente)
 
 
 # ════════════════════════════════════════════════════════════════════════════════
-# EDITAR
+# EDITAR (solo admin)
 # ════════════════════════════════════════════════════════════════════════════════
 
 @router.put("/{cliente_id}", response_model=ClienteOut)
@@ -123,12 +130,13 @@ def editar_cliente(
     cliente_id: int,
     datos: ClienteEditar,
     db: Session = Depends(get_db),
-    _: Usuario = Depends(get_usuario_actual),
+    usuario: Usuario = Depends(requiere_admin),
 ):
-    """Edita los datos de un cliente."""
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    snapshot_anterior = _snapshot_cliente(cliente)
 
     if datos.nombre is not None:
         cliente.nombre = datos.nombre
@@ -143,29 +151,57 @@ def editar_cliente(
     if datos.moneda is not None:
         cliente.moneda = datos.moneda.upper()
 
+    db.flush()
+
+    registrar_auditoria(
+        db=db,
+        usuario=usuario,
+        accion="EDITAR",
+        entidad="CLIENTE",
+        entidad_id=cliente.id,
+        entidad_nombre=cliente.nombre,
+        detalle=f"Editó el cliente '{cliente.nombre}'",
+        datos_anteriores=snapshot_anterior,
+        datos_nuevos=_snapshot_cliente(cliente),
+    )
+
     db.commit()
     db.refresh(cliente)
     return _construir_cliente_out(cliente)
 
 
 # ════════════════════════════════════════════════════════════════════════════════
-# ARCHIVAR / DESARCHIVAR
+# ARCHIVAR / DESARCHIVAR (solo admin)
 # ════════════════════════════════════════════════════════════════════════════════
 
 @router.patch("/{cliente_id}/archivar", response_model=ClienteOut)
 def archivar_cliente(
     cliente_id: int,
     db: Session = Depends(get_db),
-    _: Usuario = Depends(get_usuario_actual),
+    usuario: Usuario = Depends(requiere_admin),
 ):
-    """Archiva un cliente activo."""
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     if cliente.archivado:
         raise HTTPException(status_code=400, detail="El cliente ya está archivado")
 
+    snapshot_anterior = _snapshot_cliente(cliente)
     cliente.archivado = True
+    db.flush()
+
+    registrar_auditoria(
+        db=db,
+        usuario=usuario,
+        accion="ARCHIVAR",
+        entidad="CLIENTE",
+        entidad_id=cliente.id,
+        entidad_nombre=cliente.nombre,
+        detalle=f"Archivó el cliente '{cliente.nombre}'",
+        datos_anteriores=snapshot_anterior,
+        datos_nuevos=_snapshot_cliente(cliente),
+    )
+
     db.commit()
     db.refresh(cliente)
     return _construir_cliente_out(cliente)
@@ -175,35 +211,62 @@ def archivar_cliente(
 def desarchivar_cliente(
     cliente_id: int,
     db: Session = Depends(get_db),
-    _: Usuario = Depends(get_usuario_actual),
+    usuario: Usuario = Depends(requiere_admin),
 ):
-    """Reactiva un cliente archivado."""
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     if not cliente.archivado:
         raise HTTPException(status_code=400, detail="El cliente ya está activo")
 
+    snapshot_anterior = _snapshot_cliente(cliente)
     cliente.archivado = False
+    db.flush()
+
+    registrar_auditoria(
+        db=db,
+        usuario=usuario,
+        accion="DESARCHIVAR",
+        entidad="CLIENTE",
+        entidad_id=cliente.id,
+        entidad_nombre=cliente.nombre,
+        detalle=f"Desarchivó el cliente '{cliente.nombre}'",
+        datos_anteriores=snapshot_anterior,
+        datos_nuevos=_snapshot_cliente(cliente),
+    )
+
     db.commit()
     db.refresh(cliente)
     return _construir_cliente_out(cliente)
 
 
 # ════════════════════════════════════════════════════════════════════════════════
-# ELIMINAR
+# ELIMINAR (solo admin)
 # ════════════════════════════════════════════════════════════════════════════════
 
 @router.delete("/{cliente_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_cliente(
     cliente_id: int,
     db: Session = Depends(get_db),
-    _: Usuario = Depends(get_usuario_actual),
+    usuario: Usuario = Depends(requiere_admin),
 ):
-    """Elimina permanentemente un cliente."""
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    snapshot_anterior = _snapshot_cliente(cliente)
+    nombre = cliente.nombre
+
+    registrar_auditoria(
+        db=db,
+        usuario=usuario,
+        accion="ELIMINAR",
+        entidad="CLIENTE",
+        entidad_id=cliente.id,
+        entidad_nombre=nombre,
+        detalle=f"Eliminó permanentemente el cliente '{nombre}'",
+        datos_anteriores=snapshot_anterior,
+    )
 
     db.delete(cliente)
     db.commit()

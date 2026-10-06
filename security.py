@@ -8,8 +8,6 @@ import os
 
 from database import get_db
 from models import Usuario
-from sesion_models import SesionUsuario
-from sesiones import obtener_sesion_valida
 
 
 SECRET_KEY = os.getenv(
@@ -30,23 +28,14 @@ _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def hash_password(password: str) -> str:
-    """Genera un hash bcrypt de la contraseña."""
     return _pwd_context.hash(password)
 
 
-def verificar_password(
-    plain_password: str,
-    hashed_password: str
-) -> bool:
-    """Verifica la contraseña contra su hash bcrypt."""
+def verificar_password(plain_password: str, hashed_password: str) -> bool:
     return _pwd_context.verify(plain_password, hashed_password)
 
 
 def es_texto_plano(password_hash: str) -> bool:
-    """
-    Detecta si el valor guardado es texto plano (no un hash bcrypt).
-    Los hashes bcrypt siempre empiezan con '$2b$' o '$2a$'.
-    """
     return not (
         password_hash.startswith("$2b$") or
         password_hash.startswith("$2a$")
@@ -57,48 +46,33 @@ def es_texto_plano(password_hash: str) -> bool:
 # JWT
 # ============================================================
 
-def crear_token(
-    data: dict,
-    expires_delta: timedelta = None
-) -> str:
-
+def crear_token(data: dict, expires_delta: timedelta = None) -> str:
     to_encode = data.copy()
 
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(
-            minutes=ACCESS_TOKEN_EXPIRE_MINUTES
-        )
+        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
 
     to_encode.update({"exp": expire})
 
-    return jwt.encode(
-        to_encode,
-        SECRET_KEY,
-        algorithm=ALGORITHM
-    )
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
 def decodificar_token(token: str):
-
     try:
-        return jwt.decode(
-            token,
-            SECRET_KEY,
-            algorithms=[ALGORITHM]
-        )
-
+        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     except JWTError:
         return None
 
 
-def _validar_credenciales(
-    credentials: HTTPAuthorizationCredentials,
-    db: Session,
-):
-    """Valida JWT + usuario + sesión en BD. Devuelve (usuario, sesion)."""
-    payload = decodificar_token(credentials.credentials)
+def get_usuario_actual(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+) -> Usuario:
+
+    token = credentials.credentials
+    payload = decodificar_token(token)
 
     if not payload:
         raise HTTPException(
@@ -116,9 +90,7 @@ def _validar_credenciales(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    usuario = db.query(Usuario).filter(
-        Usuario.email == email
-    ).first()
+    usuario = db.query(Usuario).filter(Usuario.email == email).first()
 
     if not usuario:
         raise HTTPException(
@@ -132,33 +104,7 @@ def _validar_credenciales(
             detail="Usuario desactivado",
         )
 
-    # La sesión debe seguir activa en BD (no cerrada por logout, límite o admin)
-    sesion = obtener_sesion_valida(db, payload.get("jti"), usuario.id)
-    if not sesion:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Sesión cerrada o expirada. Inicia sesión nuevamente.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    return usuario, sesion
-
-
-def get_usuario_actual(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
-) -> Usuario:
-    usuario, _ = _validar_credenciales(credentials, db)
     return usuario
-
-
-def get_sesion_actual(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
-) -> SesionUsuario:
-    """Devuelve la sesión (fila de sesiones_usuario) del token actual."""
-    _, sesion = _validar_credenciales(credentials, db)
-    return sesion
 
 
 # ============================================================
@@ -176,7 +122,7 @@ ROLES_ADMIN = {
 def requiere_admin(
     usuario: Usuario = Depends(get_usuario_actual)
 ) -> Usuario:
-    """Solo ADMIN / ADMINISTRADOR pueden acceder."""
+
     rol = (getattr(usuario, "rol", "") or "").strip().upper()
 
     if rol not in ROLES_ADMIN:
@@ -195,6 +141,7 @@ def requiere_admin(
 ROLES_AUDITORIA = {
     "ADMIN",
     "ADMINISTRADOR",
+    "ADMINISTRACION",
     "SUPERADMIN",
     "SUPERVISOR",
 }
@@ -204,14 +151,12 @@ def requiere_auditoria(
     usuario: Usuario = Depends(get_usuario_actual)
 ) -> Usuario:
 
-    rol = (
-        getattr(usuario, "rol", "") or ""
-    ).strip().upper()
+    rol = (getattr(usuario, "rol", "") or "").strip().upper()
 
     if rol not in ROLES_AUDITORIA:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="No tienes permisos para consultar la auditoría de proyectos"
+            detail="No tienes permisos para consultar la auditoría"
         )
 
     return usuario

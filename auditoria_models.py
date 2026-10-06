@@ -1,60 +1,33 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
-from sqlalchemy.orm import relationship
+# auditoria_models.py
+from sqlalchemy import Column, Integer, String, Text, DateTime
 from sqlalchemy.sql import func
-
 from database import Base
 
 
-class AuditoriaProyecto(Base):
-    """
-    Registro de auditoría de acciones realizadas sobre un proyecto
-    (crear, editar, archivar, desarchivar, eliminar).
+class Auditoria(Base):
+    __tablename__ = "auditoria"
 
-    Se guarda el nombre del proyecto en el momento de la acción
-    (snapshot) para que el historial siga siendo legible incluso
-    si el proyecto termina siendo eliminado físicamente.
-    """
+    id = Column(Integer, primary_key=True, index=True)
 
-    __tablename__ = "auditoria_proyectos"
+    # ── Quién ──────────────────────────────────────────────
+    usuario_id = Column(Integer, nullable=True, index=True)
+    usuario_nombre = Column(String(255), nullable=True)
+    usuario_email = Column(String(255), nullable=True)
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    # ── Qué ────────────────────────────────────────────────
+    accion = Column(String(50), nullable=False, index=True)
+    entidad = Column(String(50), nullable=False, index=True)
+    entidad_id = Column(Integer, nullable=True, index=True)
+    entidad_nombre = Column(String(255), nullable=True)
 
-    proyecto_id = Column(
-        Integer,
-        ForeignKey("proyectos.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
+    # ── Contexto de proyecto (opcional) ───────────────────
+    proyecto_id = Column(Integer, nullable=True, index=True)
+    proyecto_nombre = Column(String(255), nullable=True)
 
-    proyecto_nombre = Column(String(200), nullable=False)
-
-    usuario_id = Column(
-        Integer,
-        ForeignKey("usuariosPrueba.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-
-    accion = Column(String(30), nullable=False, index=True)
-    # CREAR | EDITAR | ARCHIVAR | DESARCHIVAR | ELIMINAR
-
+    # ── Detalle ───────────────────────────────────────────
     detalle = Column(Text, nullable=True)
-    # Descripción legible de qué cambió (ej: "estado: ACTIVO -> PAUSADO")
+    datos_anteriores = Column(Text, nullable=True)
+    datos_nuevos = Column(Text, nullable=True)
 
-    creado_en = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        index=True,
-    )
-
-    usuario = relationship("Usuario", foreign_keys=[usuario_id])
-
-    @property
-    def usuario_nombre(self) -> str | None:
-        if not self.usuario:
-            return None
-        return f"{self.usuario.nombre} {self.usuario.apellido}".strip()
-
-    @property
-    def usuario_email(self) -> str | None:
-        return self.usuario.email if self.usuario else None
+    # ── Cuándo ────────────────────────────────────────────
+    fecha = Column(DateTime, server_default=func.now(), index=True)
