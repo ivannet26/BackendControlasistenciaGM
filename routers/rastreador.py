@@ -974,3 +974,107 @@ def eliminar_registro_tiempo_admin(
     db.commit()
 
     return None
+# ============================================================
+# EDITAR REGISTRO DE TIEMPO (SOLO ADMIN)
+# ============================================================
+
+@router.put(
+    "/admin/tiempo/{registro_id}",
+    response_model=schemas.TiempoRegistroOut
+)
+def editar_registro_tiempo_admin(
+    registro_id: int,
+    datos: schemas.TiempoEditarAdmin,
+    db: Session = Depends(get_db),
+    admin: Usuario = Depends(requiere_admin)
+):
+    registro = db.query(TiempoRegistro).filter(
+        TiempoRegistro.id == registro_id
+    ).first()
+
+    if not registro:
+        raise HTTPException(
+            status_code=404,
+            detail="Registro de tiempo no encontrado"
+        )
+
+    # 📸 Snapshot ANTES de la edición
+    snapshot_anterior = {
+        "inicio": registro.inicio.isoformat() if registro.inicio else None,
+        "fin": registro.fin.isoformat() if registro.fin else None,
+        "descripcion": registro.descripcion,
+        "duracion_segundos": registro.duracion_segundos,
+    }
+
+    # Aplicar cambios
+    if datos.inicio is not None:
+        registro.inicio = datos.inicio
+
+    if datos.fin is not None:
+        registro.fin = datos.fin
+
+    if datos.descripcion is not None:
+        registro.descripcion = datos.descripcion
+
+    # Recalcular duración
+    if registro.inicio and registro.fin:
+        inicio_aware = (
+            registro.inicio if registro.inicio.tzinfo
+            else registro.inicio.replace(tzinfo=TZ_PERU)
+        )
+        fin_aware = (
+            registro.fin if registro.fin.tzinfo
+            else registro.fin.replace(tzinfo=TZ_PERU)
+        )
+
+        if fin_aware <= inicio_aware:
+            raise HTTPException(
+                status_code=400,
+                detail="La hora de fin debe ser mayor que la de inicio"
+            )
+
+        duracion = int((fin_aware - inicio_aware).total_seconds())
+
+        # 🛡️ Validación: máximo 12 horas por registro
+        if duracion > 12 * 3600:
+            raise HTTPException(
+                status_code=400,
+                detail="Un registro no puede superar las 12 horas"
+            )
+
+        registro.duracion_segundos = duracion
+
+    # 🔥 AUDITORÍA
+    usuario_afectado = db.query(Usuario).filter(
+        Usuario.id == registro.usuario_id
+    ).first()
+
+    registrar_auditoria(
+        db=db,
+        usuario=admin,
+        accion="EDITAR_TIEMPO",
+        entidad="TIEMPO_REGISTRO",
+        entidad_id=registro.id,
+        entidad_nombre=registro.descripcion or "(sin descripción)",
+        detalle=(
+            f"Admin {admin.nombre} {admin.apellido} editó el tiempo de "
+            f"{usuario_afectado.nombre} {usuario_afectado.apellido}. "
+            f"Motivo: {datos.motivo}"
+        ),
+        datos_anteriores=snapshot_anterior,
+        datos_nuevos={
+            "inicio": registro.inicio.isoformat() if registro.inicio else None,
+            "fin": registro.fin.isoformat() if registro.fin else None,
+            "descripcion": registro.descripcion,
+            "duracion_segundos": registro.duracion_segundos,
+            "motivo": datos.motivo,
+        },
+    )
+
+    db.commit()
+
+    # Recargar con eager loading
+    return db.query(TiempoRegistro).options(
+        joinedload(TiempoRegistro.proyecto),
+        joinedload(TiempoRegistro.tarea)
+    ).filter(TiempoRegistro.id == registro.id).first()

@@ -1,7 +1,9 @@
 from pydantic import BaseModel, EmailStr
 from datetime import datetime, date
 from typing import Optional, List
-
+from pydantic import BaseModel, Field
+from typing import Optional
+from datetime import datetime
 
 
 # Para registro
@@ -209,3 +211,9 @@ class UsuarioEditar(BaseModel):
     password: Optional[str] = None
     rol: Optional[str] = None
     activo: Optional[bool] = None
+
+class TiempoEditarAdmin(BaseModel):
+    inicio: Optional[datetime] = None
+    fin: Optional[datetime] = None
+    descripcion: Optional[str] = None
+    motivo: str = Field(..., min_length=10, max_length=500)
