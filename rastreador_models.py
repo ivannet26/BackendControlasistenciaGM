@@ -7,6 +7,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Table,
@@ -316,3 +317,31 @@ class TiempoRegistro(Base):
     def titulo_tarea(self) -> str | None:
         """Devuelve el título de la tarea."""
         return self.tarea.titulo if self.tarea else None
+
+
+# ============================================================
+# RASTREADOR AUTOMÁTICO — REGISTROS DE ACTIVIDAD
+# ============================================================
+class RastreadorRegistro(Base):
+    __tablename__ = "rastreador_registros"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    usuario_id = Column(
+        Integer,
+        ForeignKey("usuariosPrueba.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    aplicacion = Column(String(255), nullable=False)
+    descripcion = Column(String(500), nullable=True)
+    url = Column(String(1000), nullable=True)
+    hora_inicio = Column(DateTime, nullable=False, index=True)
+    hora_fin = Column(DateTime, nullable=True)
+    duracion_segundos = Column(Integer, nullable=False, default=0)
+    inactividad_pct = Column(Numeric(5, 4), nullable=False, default=0)
+    color = Column(String(20), nullable=True)
+    agregar_como = Column(String(50), nullable=True)
+    creado_en = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(TZ_PERU),
+    )

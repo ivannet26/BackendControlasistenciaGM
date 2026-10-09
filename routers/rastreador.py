@@ -13,6 +13,8 @@ from equipo_models import Etiqueta, MiembroEquipo
 from proyecto_models import Proyecto
 from rastreador_models import Tarea, EnlaceRastreador, TiempoRegistro
 from security import get_usuario_actual, requiere_admin
+from rastreador_models import RastreadorRegistro  # añade al import de arriba
+from datetime import time as _time
 
 router = APIRouter(
     prefix="/rastreador",
@@ -1078,3 +1080,140 @@ def editar_registro_tiempo_admin(
         joinedload(TiempoRegistro.proyecto),
         joinedload(TiempoRegistro.tarea)
     ).filter(TiempoRegistro.id == registro.id).first()
+# ============================================================
+# RASTREADOR AUTOMÁTICO — ACTIVIDAD
+# ============================================================
+
+from datetime import time as _time
+from rastreador_models import RastreadorRegistro
+
+
+def _seg_a_hhmmss(seg: int) -> str:
+    seg = max(0, int(seg or 0))
+    h = seg // 3600
+    m = (seg % 3600) // 60
+    s = seg % 60
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
+
+@router.post(
+    "/actividad/lote",
+    response_model=schemas.RastreadorLoteOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def subir_lote_actividad(
+    datos: schemas.RastreadorLoteIn,
+    db: Session = Depends(get_db),
+    usuario=Depends(get_usuario_actual),
+):
+    insertados = 0
+    ignorados = 0
+
+    for r in datos.registros:
+        if not r.aplicacion or not r.hora_inicio:
+            ignorados += 1
+            continue
+
+        dur = r.duracion_segundos or 0
+        if r.hora_fin and r.hora_fin > r.hora_inicio:
+            dur = int((r.hora_fin - r.hora_inicio).total_seconds())
+
+        if dur < 1 or dur > 12 * 3600:
+            ignorados += 1
+            continue
+
+        db.add(RastreadorRegistro(
+            usuario_id=usuario.id,
+            aplicacion=r.aplicacion[:255],
+            descripcion=(r.descripcion or "")[:500] or None,
+            url=(r.url or "")[:1000] or None,
+            hora_inicio=r.hora_inicio,
+            hora_fin=r.hora_fin,
+            duracion_segundos=dur,
+            inactividad_pct=min(max(r.inactividad_pct or 0, 0), 1),
+            color=(r.color or "")[:20] or None,
+        ))
+        insertados += 1
+
+    db.commit()
+    return {"insertados": insertados, "ignorados": ignorados}
+
+
+@router.get("/actividad/dia", response_model=schemas.RastreadorDiaOut)
+def obtener_actividad_dia(
+    fecha: date,
+    db: Session = Depends(get_db),
+    usuario=Depends(get_usuario_actual),
+):
+    desde = datetime.combine(fecha, _time.min, tzinfo=TZ_PERU)
+    hasta = datetime.combine(fecha, _time.max, tzinfo=TZ_PERU)
+
+    filas = (
+        db.query(RastreadorRegistro)
+        .filter(
+            RastreadorRegistro.usuario_id == usuario.id,
+            RastreadorRegistro.hora_inicio >= desde,
+            RastreadorRegistro.hora_inicio <= hasta,
+        )
+        .order_by(RastreadorRegistro.hora_inicio.asc())
+        .all()
+    )
+
+    registros = []
+    total_por_app = {}
+
+    for r in filas:
+        hi = r.hora_inicio.strftime("%H:%M") if r.hora_inicio else "—"
+        hf = r.hora_fin.strftime("%H:%M") if r.hora_fin else "en curso"
+
+        registros.append({
+            "app": r.aplicacion,
+            "descripcion": r.descripcion or "—",
+            "url": r.url,
+            "hora_inicio": hi,
+            "hora_fin": hf,
+            "duracion": _seg_a_hhmmss(r.duracion_segundos),
+            "inactividad": float(r.inactividad_pct or 0),
+            "color": r.color or "#2196f3",
+        })
+
+        acc = total_por_app.setdefault(r.aplicacion, {"seg": 0, "color": r.color})
+        acc["seg"] += int(r.duracion_segundos or 0)
+        if not acc["color"] and r.color:
+            acc["color"] = r.color
+
+    total_dia = sum(v["seg"] for v in total_por_app.values()) or 1
+
+    grupo = [
+        {
+            "app": app,
+            "color": info["color"] or "#2196f3",
+            "uso_pct": round(info["seg"] / total_dia * 100, 1),
+            "total_str": _seg_a_hhmmss(info["seg"]),
+        }
+        for app, info in sorted(total_por_app.items(), key=lambda kv: -kv[1]["seg"])
+    ]
+
+    return {"registros": registros, "grupo": grupo}
+
+
+@router.delete("/actividad/{registro_id}", status_code=status.HTTP_204_NO_CONTENT)
+def eliminar_registro_actividad(
+    registro_id: int,
+    db: Session = Depends(get_db),
+    usuario=Depends(get_usuario_actual),
+):
+    reg = (
+        db.query(RastreadorRegistro)
+        .filter(
+            RastreadorRegistro.id == registro_id,
+            RastreadorRegistro.usuario_id == usuario.id,
+        )
+        .first()
+    )
+    if not reg:
+        raise HTTPException(status_code=404, detail="Registro no encontrado")
+
+    db.delete(reg)
+    db.commit()
+    return None

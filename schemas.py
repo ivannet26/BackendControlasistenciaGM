@@ -217,3 +217,31 @@ class TiempoEditarAdmin(BaseModel):
     fin: Optional[datetime] = None
     descripcion: Optional[str] = None
     motivo: str = Field(..., min_length=10, max_length=500)
+
+# ============================================================
+# RASTREADOR AUTOMÁTICO — SCHEMAS
+# ============================================================
+
+class RastreadorRegistroIn(BaseModel):
+    aplicacion: str
+    descripcion: Optional[str] = None
+    url: Optional[str] = None
+    hora_inicio: datetime
+    hora_fin: Optional[datetime] = None
+    duracion_segundos: int = 0
+    inactividad_pct: float = 0.0
+    color: Optional[str] = None
+
+
+class RastreadorLoteIn(BaseModel):
+    registros: List[RastreadorRegistroIn]
+
+
+class RastreadorLoteOut(BaseModel):
+    insertados: int
+    ignorados: int
+
+
+class RastreadorDiaOut(BaseModel):
+    registros: List[dict]
+    grupo: List[dict]
