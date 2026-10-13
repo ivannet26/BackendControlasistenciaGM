@@ -2,19 +2,38 @@
 # Módulo de gestión de usuarios: SOLO administradores.
 
 from datetime import datetime
+from pathlib import Path
+import time
 from zoneinfo import ZoneInfo
 from typing import List, Optional
 
 from sqlalchemy import func, or_
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 
 import schemas
+from auditoria_helper import registrar_auditoria
 from database import get_db
 from models import Usuario
+from perfil_models import PerfilUsuario
+from perfil_schemas import CambiarPasswordRequest, PerfilEditar, PerfilOut
 from rastreador_models import TiempoRegistro
-from security import hash_password, requiere_admin
-from auditoria_helper import registrar_auditoria
+from routers.perfil import _actualizar_perfil
+from security import (
+    get_usuario_actual,
+    hash_password,
+    requiere_admin,
+    verificar_password,
+)
 
 
 TZ_PERU = ZoneInfo("America/Lima")
@@ -396,3 +415,165 @@ def eliminar_usuario(
         )
 
     return None
+
+
+# ============================================================
+# PERFIL DEL USUARIO AUTENTICADO (COMPATIBILIDAD)
+# ============================================================
+
+@router.put("/me", response_model=PerfilOut)
+def actualizar_mi_perfil_compatibilidad(
+    datos: PerfilEditar,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_usuario_actual),
+):
+    return _actualizar_perfil(db, usuario, datos)
+
+
+@router.put("/me/password")
+def cambiar_mi_password(
+    datos: CambiarPasswordRequest,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_usuario_actual),
+):
+    usuario = (
+        db.query(Usuario)
+        .filter(Usuario.id == usuario.id)
+        .with_for_update()
+        .first()
+    )
+    if usuario is None:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    if not verificar_password(datos.password_actual, usuario.password_hash):
+        raise HTTPException(
+            status_code=400,
+            detail="La contraseña actual es incorrecta",
+        )
+
+    usuario.password_hash = hash_password(datos.password_nueva)
+    db.flush()
+    registrar_auditoria(
+        db=db,
+        usuario=usuario,
+        accion="CAMBIAR_PASSWORD",
+        entidad="USUARIO",
+        entidad_id=usuario.id,
+        entidad_nombre=f"{usuario.nombre} {usuario.apellido}",
+        detalle="Cambió su contraseña",
+    )
+    db.commit()
+    return {"mensaje": "Contraseña actualizada correctamente"}
+
+
+@router.post("/me/avatar", response_model=dict)
+async def subir_avatar(
+    archivo: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_usuario_actual),
+):
+    usuario = (
+        db.query(Usuario)
+        .filter(Usuario.id == usuario.id)
+        .with_for_update()
+        .first()
+    )
+    if usuario is None:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    extensiones_permitidas = {"png", "jpg", "jpeg", "webp", "gif"}
+    extension = Path(archivo.filename or "").suffix.lower().lstrip(".")
+    if not archivo.content_type or not archivo.content_type.lower().startswith("image/"):
+        raise HTTPException(status_code=400, detail="El archivo debe ser una imagen")
+    if extension not in extensiones_permitidas:
+        raise HTTPException(
+            status_code=400,
+            detail="Extensión no permitida. Usa png, jpg, jpeg, webp o gif",
+        )
+
+    contenido = await archivo.read()
+    if len(contenido) > 2 * 1024 * 1024:
+        raise HTTPException(
+            status_code=400,
+            detail="El avatar no puede superar los 2 MB",
+        )
+
+    directorio_avatars = Path(__file__).resolve().parent.parent / "static" / "avatars"
+    perfil = (
+        db.query(PerfilUsuario)
+        .filter(PerfilUsuario.usuario_id == usuario.id)
+        .first()
+    )
+    if perfil is None:
+        perfil = PerfilUsuario(usuario_id=usuario.id)
+        db.add(perfil)
+
+    avatar_anterior = perfil.avatar_url
+    directorio_avatars.mkdir(parents=True, exist_ok=True)
+    for archivo_viejo in directorio_avatars.glob(f"usuario_{usuario.id}_*"):
+        try:
+            archivo_viejo.unlink()
+        except OSError as error:
+            print(f"No se pudo borrar {archivo_viejo}: {error}")
+
+    # Elimina también los avatares con el formato anterior, sin timestamp.
+    for archivo_viejo in directorio_avatars.glob(f"usuario_{usuario.id}.*"):
+        try:
+            archivo_viejo.unlink()
+        except OSError as error:
+            print(f"No se pudo borrar {archivo_viejo}: {error}")
+
+    timestamp = int(time.time() * 1000)
+    nombre_unico = f"usuario_{usuario.id}_{timestamp}.{extension}"
+    ruta_archivo = directorio_avatars / nombre_unico
+
+    archivo_iniciado = False
+    try:
+        archivo_iniciado = True
+        with open(ruta_archivo, "wb") as archivo_destino:
+            archivo_destino.write(contenido)
+        if not ruta_archivo.is_file() or ruta_archivo.stat().st_size != len(contenido):
+            raise OSError("No se pudo verificar el archivo guardado")
+    except OSError as error:
+        if archivo_iniciado:
+            try:
+                ruta_archivo.unlink()
+            except FileNotFoundError:
+                pass
+        raise HTTPException(
+            status_code=500,
+            detail="No se pudo guardar el archivo del avatar",
+        ) from error
+
+    avatar_url = f"/static/avatars/{nombre_unico}"
+    perfil.avatar_url = avatar_url
+    try:
+        db.flush()
+        registrar_auditoria(
+            db=db,
+            usuario=usuario,
+            accion="ACTUALIZAR_AVATAR",
+            entidad="PERFIL",
+            entidad_id=usuario.id,
+            entidad_nombre=f"{usuario.nombre} {usuario.apellido}",
+            detalle=f"Actualizó su avatar a {avatar_url}",
+            datos_anteriores={"avatar_url": avatar_anterior},
+            datos_nuevos={"avatar_url": avatar_url},
+        )
+        db.commit()
+    except SQLAlchemyError as error:
+        db.rollback()
+        try:
+            ruta_archivo.unlink()
+        except FileNotFoundError:
+            pass
+        raise HTTPException(
+            status_code=500,
+            detail="No se pudo actualizar el avatar en la base de datos",
+        ) from error
+
+    return {
+        "ok": True,
+        "avatar_url": avatar_url,
+        "mensaje": "Avatar actualizado correctamente",
+    }

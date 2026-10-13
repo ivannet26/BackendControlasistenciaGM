@@ -1,7 +1,10 @@
 import os
+from pathlib import Path
+
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from routers import usuarios as usuarios_router 
 from database import Base, engine
 from routers import auth as auth_router
@@ -14,6 +17,7 @@ from routers import panel as panel_router
 from routers import informes as informes_router
 from routers import auditoria as auditoria_router
 from routers import asistencia as asistencia_router
+from routers import perfil as perfil_router
 import auditoria_models  # noqa: F401
 import rastreador_models  # noqa: F401
 import equipo_models  # noqa: F401
@@ -21,6 +25,7 @@ import cliente_models  # noqa: F401
 import proyecto_models  # noqa: F401
 import proyecto_auditoria_models  # noqa: F401
 import asistencia_models  # noqa: F401
+import perfil_models  # noqa: F401
 
 
 
@@ -66,7 +71,11 @@ app.include_router(panel_router.router)
 app.include_router(informes_router.router)
 app.include_router(auditoria_router.router)
 app.include_router(asistencia_router.router)
+app.include_router(perfil_router.router)
 
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+(STATIC_DIR / "avatars").mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 # ── Health check ──────────────────────────────────────────────────────────────
