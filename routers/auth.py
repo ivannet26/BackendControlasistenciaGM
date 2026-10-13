@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 import models
 import schemas
+from perfil_models import PerfilUsuario
 from security import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     crear_token,
@@ -89,6 +90,13 @@ def login(datos: schemas.LoginRequest, db: Session = Depends(get_db)):
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
 
+    perfil = (
+        db.query(PerfilUsuario)
+        .filter(PerfilUsuario.usuario_id == usuario.id)
+        .first()
+    )
+    avatar_url = perfil.avatar_url if perfil else None
+
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -97,7 +105,8 @@ def login(datos: schemas.LoginRequest, db: Session = Depends(get_db)):
             "nombre": usuario.nombre,
             "apellido": usuario.apellido,
             "email": usuario.email,
-            "rol": usuario.rol
+            "rol": usuario.rol,
+            "avatar_url": avatar_url,
         }
     }
 
