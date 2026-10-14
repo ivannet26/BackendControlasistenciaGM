@@ -39,26 +39,48 @@ def subir_archivo_r2(
     content_type: str,
 ) -> str:
     """Sube un archivo a R2 y devuelve la URL pública."""
-    if not all(
-        (
-            R2_ACCESS_KEY_ID,
-            R2_SECRET_ACCESS_KEY,
-            R2_ENDPOINT_URL,
-            R2_BUCKET_NAME,
-            R2_PUBLIC_URL,
-        )
-    ):
-        raise RuntimeError("La configuración de Cloudflare R2 está incompleta")
+    try:
+        if not all(
+            (
+                R2_ACCESS_KEY_ID,
+                R2_SECRET_ACCESS_KEY,
+                R2_ENDPOINT_URL,
+                R2_BUCKET_NAME,
+                R2_PUBLIC_URL,
+            )
+        ):
+            raise RuntimeError("La configuración de Cloudflare R2 está incompleta")
 
-    cliente = obtener_cliente_r2()
-    cliente.put_object(
-        Bucket=R2_BUCKET_NAME,
-        Key=nombre_objeto,
-        Body=contenido_bytes,
-        ContentType=content_type,
-        CacheControl="public, max-age=31536000, immutable",
-    )
-    return f"{R2_PUBLIC_URL}/{nombre_objeto}"
+        cliente = obtener_cliente_r2()
+        cliente.put_object(
+            Bucket=R2_BUCKET_NAME,
+            Key=nombre_objeto,
+            Body=contenido_bytes,
+            ContentType=content_type,
+            CacheControl="public, max-age=31536000, immutable",
+        )
+
+        try:
+            cliente.head_object(Bucket=R2_BUCKET_NAME, Key=nombre_objeto)
+            print(
+                f"[R2] Verificado: {nombre_objeto} existe en el bucket",
+                flush=True,
+            )
+        except Exception as error:
+            print(
+                f"[R2] ADVERTENCIA: {nombre_objeto} NO existe después de subir: "
+                f"{type(error).__name__}: {error}",
+                flush=True,
+            )
+
+        return f"{R2_PUBLIC_URL}/{nombre_objeto}"
+    except Exception as error:
+        print(
+            f"[R2] Error al subir {nombre_objeto}: "
+            f"{type(error).__name__}: {error}",
+            flush=True,
+        )
+        raise
 
 
 def eliminar_archivo_r2(nombre_objeto: str) -> None:
