@@ -2,7 +2,6 @@
 # Módulo de gestión de usuarios: SOLO administradores.
 
 from datetime import datetime
-from pathlib import Path
 import time
 from zoneinfo import ZoneInfo
 from typing import List, Optional
@@ -26,6 +25,7 @@ from database import get_db
 from models import Usuario
 from perfil_models import PerfilUsuario
 from perfil_schemas import CambiarPasswordRequest, PerfilEditar, PerfilOut
+from r2_client import R2_PUBLIC_URL, eliminar_archivo_r2, subir_archivo_r2
 from rastreador_models import TiempoRegistro
 from routers.perfil import _actualizar_perfil
 from security import (
@@ -481,71 +481,41 @@ async def subir_avatar(
     if usuario is None:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
-    extensiones_permitidas = {"png", "jpg", "jpeg", "webp", "gif"}
-    extension = Path(archivo.filename or "").suffix.lower().lstrip(".")
-    if not archivo.content_type or not archivo.content_type.lower().startswith("image/"):
+    if not archivo.content_type or not archivo.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="El archivo debe ser una imagen")
-    if extension not in extensiones_permitidas:
+
+    ext_permitidas = {"png", "jpg", "jpeg", "webp", "gif"}
+    nombre_original = archivo.filename or ""
+    ext = nombre_original.rsplit(".", 1)[-1].lower() if "." in nombre_original else ""
+    if ext not in ext_permitidas:
         raise HTTPException(
             status_code=400,
-            detail="Extensión no permitida. Usa png, jpg, jpeg, webp o gif",
+            detail="Formato no permitido. Usa PNG, JPG, WEBP o GIF",
         )
 
     contenido = await archivo.read()
     if len(contenido) > 2 * 1024 * 1024:
-        raise HTTPException(
-            status_code=400,
-            detail="El avatar no puede superar los 2 MB",
-        )
+        raise HTTPException(status_code=400, detail="La imagen no debe superar 2 MB")
 
-    directorio_avatars = Path(__file__).resolve().parent.parent / "static" / "avatars"
     perfil = (
         db.query(PerfilUsuario)
         .filter(PerfilUsuario.usuario_id == usuario.id)
         .first()
     )
+    avatar_anterior = perfil.avatar_url if perfil else None
+    timestamp = int(time.time() * 1000)
+    nombre_objeto = f"avatares/usuario_{usuario.id}_{timestamp}.{ext}"
+    try:
+        avatar_url = subir_archivo_r2(contenido, nombre_objeto, archivo.content_type)
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al subir a R2: {error}",
+        ) from error
+
     if perfil is None:
         perfil = PerfilUsuario(usuario_id=usuario.id)
         db.add(perfil)
-
-    avatar_anterior = perfil.avatar_url
-    directorio_avatars.mkdir(parents=True, exist_ok=True)
-    for archivo_viejo in directorio_avatars.glob(f"usuario_{usuario.id}_*"):
-        try:
-            archivo_viejo.unlink()
-        except OSError as error:
-            print(f"No se pudo borrar {archivo_viejo}: {error}")
-
-    # Elimina también los avatares con el formato anterior, sin timestamp.
-    for archivo_viejo in directorio_avatars.glob(f"usuario_{usuario.id}.*"):
-        try:
-            archivo_viejo.unlink()
-        except OSError as error:
-            print(f"No se pudo borrar {archivo_viejo}: {error}")
-
-    timestamp = int(time.time() * 1000)
-    nombre_unico = f"usuario_{usuario.id}_{timestamp}.{extension}"
-    ruta_archivo = directorio_avatars / nombre_unico
-
-    archivo_iniciado = False
-    try:
-        archivo_iniciado = True
-        with open(ruta_archivo, "wb") as archivo_destino:
-            archivo_destino.write(contenido)
-        if not ruta_archivo.is_file() or ruta_archivo.stat().st_size != len(contenido):
-            raise OSError("No se pudo verificar el archivo guardado")
-    except OSError as error:
-        if archivo_iniciado:
-            try:
-                ruta_archivo.unlink()
-            except FileNotFoundError:
-                pass
-        raise HTTPException(
-            status_code=500,
-            detail="No se pudo guardar el archivo del avatar",
-        ) from error
-
-    avatar_url = f"/static/avatars/{nombre_unico}"
     perfil.avatar_url = avatar_url
     try:
         db.flush()
@@ -556,22 +526,28 @@ async def subir_avatar(
             entidad="PERFIL",
             entidad_id=usuario.id,
             entidad_nombre=f"{usuario.nombre} {usuario.apellido}",
-            detalle=f"Actualizó su avatar a {avatar_url}",
+            detalle=f"Actualizó su avatar: {nombre_original}",
             datos_anteriores={"avatar_url": avatar_anterior},
             datos_nuevos={"avatar_url": avatar_url},
         )
         db.commit()
     except SQLAlchemyError as error:
         db.rollback()
-        try:
-            ruta_archivo.unlink()
-        except FileNotFoundError:
-            pass
+        eliminar_archivo_r2(nombre_objeto)
         raise HTTPException(
             status_code=500,
             detail="No se pudo actualizar el avatar en la base de datos",
         ) from error
 
+    if (
+        avatar_anterior
+        and R2_PUBLIC_URL
+        and avatar_anterior.startswith(f"{R2_PUBLIC_URL}/")
+    ):
+        key_anterior = avatar_anterior[len(R2_PUBLIC_URL) + 1 :]
+        eliminar_archivo_r2(key_anterior)
+
+    db.refresh(perfil)
     return {
         "ok": True,
         "avatar_url": avatar_url,
