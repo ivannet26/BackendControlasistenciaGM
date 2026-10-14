@@ -24,6 +24,7 @@ class ResumenAsistenciaUsuario(BaseModel):
     usuario_nombre: str
     usuario_email: str
     rol: str
+    avatar_url: Optional[str] = None
     entrada: Optional[datetime] = None
     break_inicio: Optional[datetime] = None
     break_fin: Optional[datetime] = None

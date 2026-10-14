@@ -15,6 +15,7 @@ from asistencia_schemas import (
 from auditoria_helper import registrar_auditoria
 from database import get_db
 from models import Usuario
+from perfil_models import PerfilUsuario
 from security import get_usuario_actual, requiere_admin
 
 
@@ -205,7 +206,12 @@ def _resumen_usuarios(
     db: Session, fecha: date
 ) -> List[ResumenAsistenciaUsuario]:
     inicio, fin = _rango_fecha(fecha)
-    usuarios = db.query(Usuario).order_by(Usuario.id.asc()).all()
+    usuarios_con_perfil = (
+        db.query(Usuario, PerfilUsuario)
+        .outerjoin(PerfilUsuario, PerfilUsuario.usuario_id == Usuario.id)
+        .order_by(Usuario.id.asc())
+        .all()
+    )
     registros = (
         db.query(RegistroAsistencia)
         .filter(
@@ -225,7 +231,7 @@ def _resumen_usuarios(
         por_usuario.setdefault(registro.usuario_id, []).append(registro)
 
     resumen = []
-    for usuario in usuarios:
+    for usuario, perfil in usuarios_con_perfil:
         eventos = por_usuario.get(usuario.id, [])
         horas = {evento.tipo: _normalizar_hora(evento.hora) for evento in eventos}
         inicio_break = horas.get("BREAK_INICIO")
@@ -233,6 +239,7 @@ def _resumen_usuarios(
         duracion_break = None
         if inicio_break is not None and fin_break is not None:
             duracion_break = int((fin_break - inicio_break).total_seconds())
+        avatar_url = perfil.avatar_url if perfil else None
 
         resumen.append(
             ResumenAsistenciaUsuario(
@@ -240,6 +247,7 @@ def _resumen_usuarios(
                 usuario_nombre=f"{usuario.nombre} {usuario.apellido}".strip(),
                 usuario_email=usuario.email,
                 rol=usuario.rol or "",
+                avatar_url=avatar_url,
                 entrada=horas.get("ENTRADA"),
                 break_inicio=inicio_break,
                 break_fin=fin_break,
