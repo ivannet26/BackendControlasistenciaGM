@@ -185,13 +185,7 @@ def guardar_mi_horario(
     key_anterior = _extraer_key_r2(
         imagen_anterior.imagen_url if imagen_anterior else None
     )
-    fecha_creacion = (
-        imagen_anterior.creado_en
-        if imagen_anterior and imagen_anterior.creado_en
-        else datetime.now(TZ_PERU)
-    )
-    if fecha_creacion.tzinfo is None:
-        fecha_creacion = fecha_creacion.replace(tzinfo=TZ_PERU)
+    fecha_creacion = datetime.now(TZ_PERU)
 
     print(f"[HORARIO] Generando imagen para usuario {usuario.id}...", flush=True)
     try:
@@ -333,11 +327,25 @@ def obtener_imagen_horario_usuario(
     db: Session = Depends(get_db),
     _: Usuario = Depends(requiere_admin),
 ):
+    usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+    if usuario is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario no encontrado",
+        )
+
     imagen = (
         db.query(HorarioImagen)
         .filter(HorarioImagen.usuario_id == usuario_id)
         .first()
     )
-    if imagen is None:
-        raise HTTPException(status_code=404, detail="Imagen de horario no encontrada")
-    return {"imagen_url": imagen.imagen_url}
+    if imagen is None or not imagen.imagen_url:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ese usuario aún no ha creado su horario",
+        )
+    return {
+        "usuario_id": usuario_id,
+        "nombre": f"{usuario.nombre} {usuario.apellido}".strip(),
+        "imagen_url": imagen.imagen_url,
+    }

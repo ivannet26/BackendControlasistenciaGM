@@ -1,3 +1,6 @@
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from sqlalchemy import (
     Column,
     DateTime,
@@ -7,9 +10,11 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.sql import func
 
 from database import Base
+
+
+TZ_PERU = ZoneInfo("America/Lima")
 
 
 class HorarioBloque(Base):
@@ -32,7 +37,10 @@ class HorarioBloque(Base):
     )
     dia_semana = Column(SmallInteger, nullable=False)
     hora_inicio = Column(SmallInteger, nullable=False)
-    creado_en = Column(DateTime(timezone=True), server_default=func.now())
+    creado_en = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(TZ_PERU),
+    )
 
 
 class HorarioImagen(Base):
@@ -46,5 +54,12 @@ class HorarioImagen(Base):
         unique=True,
     )
     imagen_url = Column(Text, nullable=False)
-    creado_en = Column(DateTime(timezone=True), server_default=func.now())
-    actualizado_en = Column(DateTime(timezone=True), onupdate=func.now())
+    creado_en = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(TZ_PERU),
+    )
+    actualizado_en = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(TZ_PERU),
+        onupdate=lambda: datetime.now(TZ_PERU),
+    )

@@ -3,7 +3,6 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
 
 from database import Base
 
@@ -30,6 +29,9 @@ class RegistroAsistencia(Base):
     )
     ip_address = Column(String(45), nullable=True)
     notas = Column(Text, nullable=True)
-    creado_en = Column(DateTime(timezone=True), server_default=func.now())
+    creado_en = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(TZ_PERU),
+    )
 
     usuario = relationship("Usuario", foreign_keys=[usuario_id])
