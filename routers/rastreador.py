@@ -15,7 +15,9 @@ from rastreador_models import Tarea, EnlaceRastreador, TiempoRegistro
 from security import get_usuario_actual, requiere_admin
 from rastreador_models import RastreadorRegistro  # añade al import de arriba
 from datetime import time as _time
-
+from fastapi import WebSocket, WebSocketDisconnect
+from typing import Dict, List
+ADMINS_CONECTADOS: Dict[int, List[WebSocket]] = {}
 router = APIRouter(
     prefix="/rastreador",
     tags=["Rastreador"]
@@ -1101,7 +1103,7 @@ def _seg_a_hhmmss(seg: int) -> str:
     response_model=schemas.RastreadorLoteOut,
     status_code=status.HTTP_201_CREATED,
 )
-def subir_lote_actividad(
+async def subir_lote_actividad(
     datos: schemas.RastreadorLoteIn,
     db: Session = Depends(get_db),
     usuario=Depends(get_usuario_actual),
@@ -1136,6 +1138,35 @@ def subir_lote_actividad(
         insertados += 1
 
     db.commit()
+    # ============================================================
+    # NOTIFICAR AL ADMIN EN TIEMPO REAL
+    # ============================================================
+    if usuario.id in ADMINS_CONECTADOS:
+        # Preparamos los datos para enviar (puedes enviar lo que quieras)
+        payload = {
+            "tipo": "nueva_actividad",
+            "usuario_id": usuario.id,
+            "registros": [
+                {
+                    "app": r.aplicacion,
+                    "descripcion": r.descripcion,
+                    "url": r.url,
+                    "hora_inicio": r.hora_inicio.strftime("%H:%M"),
+                    "hora_fin": r.hora_fin.strftime("%H:%M") if r.hora_fin else "en curso",
+                    "duracion": _seg_a_hhmmss(r.duracion_segundos),
+                    "color": r.color or "#2196f3",
+                }
+                for r in datos.registros # Usamos los datos que llegaron del rastreador
+            ]
+        }
+        
+        # Enviamos el aviso a todos los admins que estén mirando a este usuario
+        for ws in ADMINS_CONECTADOS[usuario.id]:
+            try:
+                await ws.send_json(payload)
+            except Exception as e:
+                print(f"[WS] Error enviando a admin: {e}")
+
     return {"insertados": insertados, "ignorados": ignorados}
 
 
@@ -1217,3 +1248,34 @@ def eliminar_registro_actividad(
     db.delete(reg)
     db.commit()
     return None
+@router.websocket("/ws/rastreador/{usuario_id}")
+async def websocket_rastreador(websocket: WebSocket, usuario_id: int, token: str):
+    """
+    WebSocket para que el Admin vea en vivo el rastreador de un usuario.
+    Requiere un token válido en la URL (ej. ?token=eyJhbG...)
+    """
+    # NOTA: Aquí deberías validar el token y verificar que el usuario sea admin.
+    # Como no me mostraste la función exacta de validación, lo dejo comentado.
+    # Si no validas, cualquiera podría espiar. ¡Importante!
+    
+    # admin = verificar_token_y_rol(token) 
+    # if not admin or admin.rol not in ("admin", "administrador"):
+    #     await websocket.close(code=1008) # Código de error: Policy Violation
+    #     return
+
+    await websocket.accept()
+    
+    # Guardamos la conexión del admin en la lista del usuario que quiere ver
+    if usuario_id not in ADMINS_CONECTADOS:
+        ADMINS_CONECTADOS[usuario_id] = []
+    ADMINS_CONECTADOS[usuario_id].append(websocket)
+    
+    try:
+        while True:
+            # Mantener la conexión abierta
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        # Si el admin cierra la ventana, lo eliminamos de la lista
+        ADMINS_CONECTADOS[usuario_id].remove(websocket)
+        if not ADMINS_CONECTADOS[usuario_id]:
+            del ADMINS_CONECTADOS[usuario_id]
