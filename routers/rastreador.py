@@ -1227,7 +1227,52 @@ def obtener_actividad_dia(
 
     return {"registros": registros, "grupo": grupo}
 
+# ============================================================
+# OBTENER ACTIVIDAD DE UN USUARIO (SOLO ADMIN)
+# ============================================================
+@router.get("/actividad/dia/{usuario_id_objetivo}", response_model=schemas.RastreadorDiaOut)
+def obtener_actividad_dia_admin(
+    usuario_id_objetivo: int,
+    fecha: date,
+    db: Session = Depends(get_db),
+    admin: Usuario = Depends(requiere_admin), # <--- SOLO ADMINS PUEDEN USAR ESTO
+):
+    desde = datetime.combine(fecha, _time.min, tzinfo=TZ_PERU)
+    hasta = datetime.combine(fecha, _time.max, tzinfo=TZ_PERU)
 
+    filas = (
+        db.query(RastreadorRegistro)
+        .filter(
+            RastreadorRegistro.usuario_id == usuario_id_objetivo, # <--- FILTRAMOS POR EL USUARIO OBJETIVO
+            RastreadorRegistro.hora_inicio >= desde,
+            RastreadorRegistro.hora_inicio <= hasta,
+        )
+        .order_by(RastreadorRegistro.hora_inicio.asc())
+        .all()
+    )
+
+    # ... (el resto del código es idéntico al que ya tienes en obtener_actividad_dia)
+    registros = []
+    total_por_app = {}
+    for r in filas:
+        hi = r.hora_inicio.strftime("%H:%M") if r.hora_inicio else "—"
+        hf = r.hora_fin.strftime("%H:%M") if r.hora_fin else "en curso"
+        registros.append({
+            "app": r.aplicacion, "descripcion": r.descripcion or "—", "url": r.url,
+            "hora_inicio": hi, "hora_fin": hf, "duracion": _seg_a_hhmmss(r.duracion_segundos),
+            "inactividad": float(r.inactividad_pct or 0), "color": r.color or "#2196f3",
+        })
+        acc = total_por_app.setdefault(r.aplicacion, {"seg": 0, "color": r.color})
+        acc["seg"] += int(r.duracion_segundos or 0)
+        if not acc["color"] and r.color: acc["color"] = r.color
+
+    total_dia = sum(v["seg"] for v in total_por_app.values()) or 1
+    grupo = [
+        {"app": app, "color": info["color"] or "#2196f3",
+         "uso_pct": round(info["seg"] / total_dia * 100, 1), "total_str": _seg_a_hhmmss(info["seg"])}
+        for app, info in sorted(total_por_app.items(), key=lambda kv: -kv[1]["seg"])
+    ]
+    return {"registros": registros, "grupo": grupo}
 @router.delete("/actividad/{registro_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_registro_actividad(
     registro_id: int,
