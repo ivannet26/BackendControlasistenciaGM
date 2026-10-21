@@ -245,3 +245,7 @@ class RastreadorLoteOut(BaseModel):
 class RastreadorDiaOut(BaseModel):
     registros: List[dict]
     grupo: List[dict]
+    total: int = 0          
+    page: int = 1          
+    limit: int = 50         
+    total_pages: int = 1    

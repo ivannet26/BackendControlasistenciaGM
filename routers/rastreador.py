@@ -1234,24 +1234,42 @@ def obtener_actividad_dia(
 def obtener_actividad_dia_admin(
     usuario_id_objetivo: int,
     fecha: date,
+    page: int = 1,
+    limit: int = 50,
     db: Session = Depends(get_db),
-    admin: Usuario = Depends(requiere_admin), # <--- SOLO ADMINS PUEDEN USAR ESTO
+    admin: Usuario = Depends(requiere_admin),
 ):
     desde = datetime.combine(fecha, _time.min, tzinfo=TZ_PERU)
     hasta = datetime.combine(fecha, _time.max, tzinfo=TZ_PERU)
 
+    # 1. Calcular offset para paginación
+    offset = (page - 1) * limit
+
+    # 2. Consultar SOLO los registros de la página actual
     filas = (
         db.query(RastreadorRegistro)
         .filter(
-            RastreadorRegistro.usuario_id == usuario_id_objetivo, # <--- FILTRAMOS POR EL USUARIO OBJETIVO
+            RastreadorRegistro.usuario_id == usuario_id_objetivo,
             RastreadorRegistro.hora_inicio >= desde,
             RastreadorRegistro.hora_inicio <= hasta,
         )
         .order_by(RastreadorRegistro.hora_inicio.asc())
+        .offset(offset)
+        .limit(limit)
         .all()
     )
 
-    # ... (el resto del código es idéntico al que ya tienes en obtener_actividad_dia)
+    # 3. Contar el TOTAL de registros del día (para saber cuántas páginas hay)
+    total_registros = (
+        db.query(func.count(RastreadorRegistro.id))
+        .filter(
+            RastreadorRegistro.usuario_id == usuario_id_objetivo,
+            RastreadorRegistro.hora_inicio >= desde,
+            RastreadorRegistro.hora_inicio <= hasta,
+        )
+        .scalar()
+    ) or 0
+
     registros = []
     total_por_app = {}
     for r in filas:
@@ -1272,7 +1290,16 @@ def obtener_actividad_dia_admin(
          "uso_pct": round(info["seg"] / total_dia * 100, 1), "total_str": _seg_a_hhmmss(info["seg"])}
         for app, info in sorted(total_por_app.items(), key=lambda kv: -kv[1]["seg"])
     ]
-    return {"registros": registros, "grupo": grupo}
+    
+    # 4. Devolver los campos de paginación
+    return {
+        "registros": registros, 
+        "grupo": grupo,
+        "total": total_registros,
+        "page": page,
+        "limit": limit,
+        "total_pages": max(1, (total_registros + limit - 1) // limit)
+    }
 @router.delete("/actividad/{registro_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_registro_actividad(
     registro_id: int,
