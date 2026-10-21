@@ -1098,6 +1098,106 @@ def _seg_a_hhmmss(seg: int) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
+def _duracion_registro(r: RastreadorRegistro, ahora: datetime) -> int:
+    if r.hora_fin is not None or r.hora_inicio is None:
+        return max(0, int(r.duracion_segundos or 0))
+
+    inicio = r.hora_inicio
+    if inicio.tzinfo is None:
+        inicio = inicio.replace(tzinfo=TZ_PERU)
+    return max(0, int((ahora - inicio).total_seconds()))
+
+
+def _registro_actividad_a_dict(r: RastreadorRegistro, ahora: datetime) -> dict:
+    return {
+        "app": r.aplicacion,
+        "descripcion": r.descripcion or "—",
+        "url": r.url,
+        "hora_inicio": r.hora_inicio.strftime("%H:%M") if r.hora_inicio else "—",
+        "hora_fin": r.hora_fin.strftime("%H:%M") if r.hora_fin else "en curso",
+        "duracion": _seg_a_hhmmss(_duracion_registro(r, ahora)),
+        "inactividad": float(r.inactividad_pct or 0),
+        "color": r.color or "#2196f3",
+    }
+
+
+def _obtener_actividad_dia_paginada(
+    db: Session,
+    usuario_id: int,
+    fecha: date,
+    page: int,
+    limit: int,
+) -> dict:
+    desde = datetime.combine(fecha, _time.min, tzinfo=TZ_PERU)
+    hasta = datetime.combine(fecha, _time.max, tzinfo=TZ_PERU)
+    filtros = (
+        RastreadorRegistro.usuario_id == usuario_id,
+        RastreadorRegistro.hora_inicio >= desde,
+        RastreadorRegistro.hora_inicio <= hasta,
+    )
+    offset = (page - 1) * limit
+
+    filas_pagina = (
+        db.query(RastreadorRegistro)
+        .filter(*filtros)
+        .order_by(RastreadorRegistro.hora_inicio.asc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    filas_dia = (
+        db.query(RastreadorRegistro)
+        .filter(*filtros)
+        .order_by(RastreadorRegistro.hora_inicio.asc())
+        .all()
+    )
+    total_registros = (
+        db.query(func.count(RastreadorRegistro.id))
+        .filter(*filtros)
+        .scalar()
+    ) or 0
+
+    ahora = datetime.now(TZ_PERU)
+    registro_activo = next(
+        (r for r in reversed(filas_dia) if r.hora_fin is None),
+        None,
+    )
+    registros = [
+        _registro_actividad_a_dict(r, ahora)
+        for r in filas_pagina
+        if registro_activo is None or r.id != registro_activo.id
+    ]
+    if registro_activo is not None:
+        registros.insert(0, _registro_actividad_a_dict(registro_activo, ahora))
+
+    total_por_app = {}
+    for r in filas_dia:
+        acc = total_por_app.setdefault(r.aplicacion, {"seg": 0, "color": r.color})
+        acc["seg"] += _duracion_registro(r, ahora)
+        if not acc["color"] and r.color:
+            acc["color"] = r.color
+
+    total_dia = sum(v["seg"] for v in total_por_app.values()) or 1
+    grupo = [
+        {
+            "app": app,
+            "color": info["color"] or "#2196f3",
+            "uso_pct": round(info["seg"] / total_dia * 100, 1),
+            "total_str": _seg_a_hhmmss(info["seg"]),
+        }
+        for app, info in sorted(total_por_app.items(), key=lambda kv: -kv[1]["seg"])
+    ]
+
+    return {
+        "registros": registros,
+        "grupo": grupo,
+        "total": total_registros,
+        "page": page,
+        "limit": limit,
+        "total_pages": max(1, (total_registros + limit - 1) // limit),
+    }
+
+
 @router.post(
     "/actividad/lote",
     response_model=schemas.RastreadorLoteOut,
@@ -1178,75 +1278,9 @@ def obtener_actividad_dia(
     db: Session = Depends(get_db),
     usuario=Depends(get_usuario_actual),
 ):
-    desde = datetime.combine(fecha, _time.min, tzinfo=TZ_PERU)
-    hasta = datetime.combine(fecha, _time.max, tzinfo=TZ_PERU)
-    offset = (page - 1) * limit
-
-    filas = (
-        db.query(RastreadorRegistro)
-        .filter(
-            RastreadorRegistro.usuario_id == usuario.id,
-            RastreadorRegistro.hora_inicio >= desde,
-            RastreadorRegistro.hora_inicio <= hasta,
-        )
-        .order_by(RastreadorRegistro.hora_inicio.asc())
-        .offset(offset)
-        .limit(limit)
-        .all()
+    return _obtener_actividad_dia_paginada(
+        db, usuario.id, fecha, page, limit
     )
-    total_registros = (
-        db.query(func.count(RastreadorRegistro.id))
-        .filter(
-            RastreadorRegistro.usuario_id == usuario.id,
-            RastreadorRegistro.hora_inicio >= desde,
-            RastreadorRegistro.hora_inicio <= hasta,
-        )
-        .scalar()
-    ) or 0
-
-    registros = []
-    total_por_app = {}
-
-    for r in filas:
-        hi = r.hora_inicio.strftime("%H:%M") if r.hora_inicio else "—"
-        hf = r.hora_fin.strftime("%H:%M") if r.hora_fin else "en curso"
-
-        registros.append({
-            "app": r.aplicacion,
-            "descripcion": r.descripcion or "—",
-            "url": r.url,
-            "hora_inicio": hi,
-            "hora_fin": hf,
-            "duracion": _seg_a_hhmmss(r.duracion_segundos),
-            "inactividad": float(r.inactividad_pct or 0),
-            "color": r.color or "#2196f3",
-        })
-
-        acc = total_por_app.setdefault(r.aplicacion, {"seg": 0, "color": r.color})
-        acc["seg"] += int(r.duracion_segundos or 0)
-        if not acc["color"] and r.color:
-            acc["color"] = r.color
-
-    total_dia = sum(v["seg"] for v in total_por_app.values()) or 1
-
-    grupo = [
-        {
-            "app": app,
-            "color": info["color"] or "#2196f3",
-            "uso_pct": round(info["seg"] / total_dia * 100, 1),
-            "total_str": _seg_a_hhmmss(info["seg"]),
-        }
-        for app, info in sorted(total_por_app.items(), key=lambda kv: -kv[1]["seg"])
-    ]
-
-    return {
-        "registros": registros,
-        "grupo": grupo,
-        "total": total_registros,
-        "page": page,
-        "limit": limit,
-        "total_pages": max(1, (total_registros + limit - 1) // limit),
-    }
 
 # ============================================================
 # OBTENER ACTIVIDAD DE UN USUARIO (SOLO ADMIN)
@@ -1260,67 +1294,9 @@ def obtener_actividad_dia_admin(
     db: Session = Depends(get_db),
     admin: Usuario = Depends(requiere_admin),
 ):
-    desde = datetime.combine(fecha, _time.min, tzinfo=TZ_PERU)
-    hasta = datetime.combine(fecha, _time.max, tzinfo=TZ_PERU)
-
-    # 1. Calcular offset para paginación
-    offset = (page - 1) * limit
-
-    # 2. Consultar SOLO los registros de la página actual
-    filas = (
-        db.query(RastreadorRegistro)
-        .filter(
-            RastreadorRegistro.usuario_id == usuario_id_objetivo,
-            RastreadorRegistro.hora_inicio >= desde,
-            RastreadorRegistro.hora_inicio <= hasta,
-        )
-        .order_by(RastreadorRegistro.hora_inicio.asc())
-        .offset(offset)
-        .limit(limit)
-        .all()
+    return _obtener_actividad_dia_paginada(
+        db, usuario_id_objetivo, fecha, page, limit
     )
-
-    # 3. Contar el TOTAL de registros del día (para saber cuántas páginas hay)
-    total_registros = (
-        db.query(func.count(RastreadorRegistro.id))
-        .filter(
-            RastreadorRegistro.usuario_id == usuario_id_objetivo,
-            RastreadorRegistro.hora_inicio >= desde,
-            RastreadorRegistro.hora_inicio <= hasta,
-        )
-        .scalar()
-    ) or 0
-
-    registros = []
-    total_por_app = {}
-    for r in filas:
-        hi = r.hora_inicio.strftime("%H:%M") if r.hora_inicio else "—"
-        hf = r.hora_fin.strftime("%H:%M") if r.hora_fin else "en curso"
-        registros.append({
-            "app": r.aplicacion, "descripcion": r.descripcion or "—", "url": r.url,
-            "hora_inicio": hi, "hora_fin": hf, "duracion": _seg_a_hhmmss(r.duracion_segundos),
-            "inactividad": float(r.inactividad_pct or 0), "color": r.color or "#2196f3",
-        })
-        acc = total_por_app.setdefault(r.aplicacion, {"seg": 0, "color": r.color})
-        acc["seg"] += int(r.duracion_segundos or 0)
-        if not acc["color"] and r.color: acc["color"] = r.color
-
-    total_dia = sum(v["seg"] for v in total_por_app.values()) or 1
-    grupo = [
-        {"app": app, "color": info["color"] or "#2196f3",
-         "uso_pct": round(info["seg"] / total_dia * 100, 1), "total_str": _seg_a_hhmmss(info["seg"])}
-        for app, info in sorted(total_por_app.items(), key=lambda kv: -kv[1]["seg"])
-    ]
-    
-    # 4. Devolver los campos de paginación
-    return {
-        "registros": registros, 
-        "grupo": grupo,
-        "total": total_registros,
-        "page": page,
-        "limit": limit,
-        "total_pages": max(1, (total_registros + limit - 1) // limit)
-    }
 @router.delete("/actividad/{registro_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_registro_actividad(
     registro_id: int,
