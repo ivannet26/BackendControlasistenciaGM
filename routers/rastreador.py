@@ -1,7 +1,7 @@
 import secrets
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import func, case
 
@@ -1173,11 +1173,14 @@ async def subir_lote_actividad(
 @router.get("/actividad/dia", response_model=schemas.RastreadorDiaOut)
 def obtener_actividad_dia(
     fecha: date,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1),
     db: Session = Depends(get_db),
     usuario=Depends(get_usuario_actual),
 ):
     desde = datetime.combine(fecha, _time.min, tzinfo=TZ_PERU)
     hasta = datetime.combine(fecha, _time.max, tzinfo=TZ_PERU)
+    offset = (page - 1) * limit
 
     filas = (
         db.query(RastreadorRegistro)
@@ -1187,8 +1190,19 @@ def obtener_actividad_dia(
             RastreadorRegistro.hora_inicio <= hasta,
         )
         .order_by(RastreadorRegistro.hora_inicio.asc())
+        .offset(offset)
+        .limit(limit)
         .all()
     )
+    total_registros = (
+        db.query(func.count(RastreadorRegistro.id))
+        .filter(
+            RastreadorRegistro.usuario_id == usuario.id,
+            RastreadorRegistro.hora_inicio >= desde,
+            RastreadorRegistro.hora_inicio <= hasta,
+        )
+        .scalar()
+    ) or 0
 
     registros = []
     total_por_app = {}
@@ -1225,7 +1239,14 @@ def obtener_actividad_dia(
         for app, info in sorted(total_por_app.items(), key=lambda kv: -kv[1]["seg"])
     ]
 
-    return {"registros": registros, "grupo": grupo}
+    return {
+        "registros": registros,
+        "grupo": grupo,
+        "total": total_registros,
+        "page": page,
+        "limit": limit,
+        "total_pages": max(1, (total_registros + limit - 1) // limit),
+    }
 
 # ============================================================
 # OBTENER ACTIVIDAD DE UN USUARIO (SOLO ADMIN)
@@ -1234,8 +1255,8 @@ def obtener_actividad_dia(
 def obtener_actividad_dia_admin(
     usuario_id_objetivo: int,
     fecha: date,
-    page: int = 1,
-    limit: int = 50,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1),
     db: Session = Depends(get_db),
     admin: Usuario = Depends(requiere_admin),
 ):
