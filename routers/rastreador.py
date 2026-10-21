@@ -1171,9 +1171,16 @@ def _obtener_actividad_dia_paginada(
         registros.insert(0, _registro_actividad_a_dict(registro_activo, ahora))
 
     total_por_app = {}
+    total_duracion_segundos = 0
+    total_finalizado = 0
     for r in filas_dia:
+        duracion_segundos = _duracion_registro(r, ahora)
+        total_duracion_segundos += duracion_segundos
+        if r.hora_fin is not None:
+            total_finalizado += 1
+
         acc = total_por_app.setdefault(r.aplicacion, {"seg": 0, "color": r.color})
-        acc["seg"] += _duracion_registro(r, ahora)
+        acc["seg"] += duracion_segundos
         if not acc["color"] and r.color:
             acc["color"] = r.color
 
@@ -1192,6 +1199,9 @@ def _obtener_actividad_dia_paginada(
         "registros": registros,
         "grupo": grupo,
         "total": total_registros,
+        "total_iniciado": len(filas_dia),
+        "total_finalizado": total_finalizado,
+        "total_duracion": _seg_a_hhmmss(total_duracion_segundos),
         "page": page,
         "limit": limit,
         "total_pages": max(1, (total_registros + limit - 1) // limit),

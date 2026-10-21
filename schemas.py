@@ -246,6 +246,9 @@ class RastreadorDiaOut(BaseModel):
     registros: List[dict]
     grupo: List[dict]
     total: int
+    total_iniciado: int
+    total_finalizado: int
+    total_duracion: str
     page: int
     limit: int
     total_pages: int
