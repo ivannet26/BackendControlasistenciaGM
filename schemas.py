@@ -249,6 +249,8 @@ class RastreadorDiaOut(BaseModel):
     total_iniciado: int
     total_finalizado: int
     total_duracion: str
+    hora_inicio_dia: Optional[str]
+    hora_fin_dia: Optional[str]
     page: int
     limit: int
     total_pages: int

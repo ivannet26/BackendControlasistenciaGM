@@ -1162,6 +1162,18 @@ def _obtener_actividad_dia_paginada(
         (r for r in reversed(filas_dia) if r.hora_fin is None),
         None,
     )
+    hora_inicio_dia = min(
+        (r.hora_inicio for r in filas_dia if r.hora_inicio is not None),
+        default=None,
+    )
+    hora_fin_dia = (
+        "en curso"
+        if registro_activo is not None
+        else max(
+            (r.hora_fin for r in filas_dia if r.hora_fin is not None),
+            default=None,
+        )
+    )
     registros = [
         _registro_actividad_a_dict(r, ahora)
         for r in filas_pagina
@@ -1202,6 +1214,14 @@ def _obtener_actividad_dia_paginada(
         "total_iniciado": len(filas_dia),
         "total_finalizado": total_finalizado,
         "total_duracion": _seg_a_hhmmss(total_duracion_segundos),
+        "hora_inicio_dia": (
+            hora_inicio_dia.strftime("%H:%M") if hora_inicio_dia else None
+        ),
+        "hora_fin_dia": (
+            "en curso"
+            if registro_activo is not None
+            else hora_fin_dia.strftime("%H:%M") if hora_fin_dia else None
+        ),
         "page": page,
         "limit": limit,
         "total_pages": max(1, (total_registros + limit - 1) // limit),
