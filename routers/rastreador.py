@@ -1220,7 +1220,7 @@ async def subir_lote_actividad(
         if r.hora_fin and r.hora_fin > r.hora_inicio:
             dur = int((r.hora_fin - r.hora_inicio).total_seconds())
 
-        if dur < 1 or dur > 12 * 3600:
+        if dur < 3 or dur > 12 * 3600:
             ignorados += 1
             continue
 
