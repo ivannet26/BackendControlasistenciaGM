@@ -42,7 +42,14 @@ class UsuarioOut(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+    refresh_token: Optional[str] = None
     usuario: Optional[dict] = None
+
+
+class RefreshRequest(BaseModel):
+    """Cuerpo de POST /auth/refresh."""
+    refresh_token: str
+
 
 class EtiquetaSimple(BaseModel):
     id: int
