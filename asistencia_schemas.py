@@ -19,6 +19,11 @@ class RegistroAsistenciaCrear(BaseModel):
     notas: Optional[str] = None
 
 
+class JustificacionFalta(BaseModel):
+    asunto: Optional[str] = None
+    mensaje: Optional[str] = None
+
+
 class ResumenAsistenciaUsuario(BaseModel):
     usuario_id: int
     usuario_nombre: str
@@ -32,6 +37,11 @@ class ResumenAsistenciaUsuario(BaseModel):
     duracion_break_segundos: Optional[int] = None
     estado: str
     tiene_entrada: bool
+    justificacion_aceptada: Optional[bool] = False
+    comentario_admin: Optional[str] = None
+    justificacion_asunto: Optional[str] = None
+    justificacion_mensaje: Optional[str] = None
+    justificacion_evidencia_url: Optional[str] = None
 
 
 class AsistenciaHoyResponse(BaseModel):
@@ -39,3 +49,4 @@ class AsistenciaHoyResponse(BaseModel):
     fecha: str
     registros: List[RegistroAsistenciaOut]
     estado: str
+    justificacion_falta: Optional[JustificacionFalta] = None

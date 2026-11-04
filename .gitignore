@@ -1,3 +1,5 @@
 .env
 static/avatars/*
 !static/avatars/.gitkeep
+__pycache__/
+*.pyc

@@ -14,6 +14,7 @@ from asistencia_schemas import (
 )
 from auditoria_helper import registrar_auditoria
 from database import get_db
+from justificacion_models import Justificacion
 from models import Usuario
 from perfil_models import PerfilUsuario
 from security import get_usuario_actual, requiere_admin
@@ -194,11 +195,39 @@ def _respuesta_personal(
     db: Session, usuario_id: int, fecha: date
 ) -> AsistenciaHoyResponse:
     registros = _obtener_registros_fecha(db, usuario_id, fecha)
+    justificacion_falta = (
+        db.query(Justificacion)
+        .filter(
+            Justificacion.usuario_id == usuario_id,
+            Justificacion.fecha == fecha,
+            Justificacion.tipo == "Falta",
+            Justificacion.estado == "ACEPTADA",
+        )
+        .order_by(
+            Justificacion.intento_numero.desc(),
+            Justificacion.fecha_resolucion.desc(),
+            Justificacion.id.desc(),
+        )
+        .first()
+    )
+
+    estado = obtener_estado_asistencia(registros)
+    if justificacion_falta is not None:
+        estado = "FALTA_JUSTIFICADA"
+
     return AsistenciaHoyResponse(
         usuario_id=usuario_id,
         fecha=fecha.isoformat(),
         registros=[_registro_a_salida(registro) for registro in registros],
-        estado=obtener_estado_asistencia(registros),
+        estado=estado,
+        justificacion_falta=(
+            {
+                "asunto": justificacion_falta.asunto,
+                "mensaje": justificacion_falta.mensaje,
+            }
+            if justificacion_falta is not None
+            else None
+        ),
     )
 
 
@@ -230,9 +259,23 @@ def _resumen_usuarios(
     for registro in registros:
         por_usuario.setdefault(registro.usuario_id, []).append(registro)
 
+    justificaciones_aceptadas = (
+        db.query(Justificacion)
+        .filter(
+            Justificacion.fecha == fecha,
+            Justificacion.estado == "ACEPTADA",
+        )
+        .all()
+    )
+    por_usuario_justificacion = {
+        justificacion.usuario_id: justificacion
+        for justificacion in justificaciones_aceptadas
+    }
+
     resumen = []
     for usuario, perfil in usuarios_con_perfil:
         eventos = por_usuario.get(usuario.id, [])
+        justificacion = por_usuario_justificacion.get(usuario.id)
         horas = {evento.tipo: _normalizar_hora(evento.hora) for evento in eventos}
         inicio_break = horas.get("BREAK_INICIO")
         fin_break = horas.get("BREAK_FIN")
@@ -255,6 +298,19 @@ def _resumen_usuarios(
                 duracion_break_segundos=duracion_break,
                 estado=obtener_estado_asistencia(eventos),
                 tiene_entrada="ENTRADA" in horas,
+                justificacion_aceptada=justificacion is not None,
+                comentario_admin=(
+                    justificacion.comentario_admin if justificacion else None
+                ),
+                justificacion_asunto=(
+                    justificacion.asunto if justificacion else None
+                ),
+                justificacion_mensaje=(
+                    justificacion.mensaje if justificacion else None
+                ),
+                justificacion_evidencia_url=(
+                    justificacion.evidencia_url if justificacion else None
+                ),
             )
         )
     return resumen
