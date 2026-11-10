@@ -1,4 +1,5 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -19,6 +20,7 @@ from database import get_db
 router = APIRouter(prefix="/auth", tags=["Autenticación"])
 
 ROLES_ADMIN = {"ADMINISTRACION", "ADMINISTRADOR", "ADMIN"}
+TZ_PERU = ZoneInfo("America/Lima")
 
 
 @router.post("/registro", response_model=schemas.UsuarioOut, status_code=status.HTTP_201_CREATED)
@@ -36,7 +38,8 @@ def registro(datos: schemas.UsuarioRegistro, db: Session = Depends(get_db)):
         email=datos.email,
         password_hash=hash_password(datos.password),
         rol="PRACTICANTE",
-        activo=True
+        activo=True,
+        fecha_inicio_practicas=datetime.now(TZ_PERU).date(),
     )
 
     db.add(nuevo_usuario)

@@ -183,6 +183,7 @@ def crear_usuario(
         password_hash=hash_password(datos.password),
         rol=_normalizar_rol(datos.rol),
         activo=True,
+        fecha_inicio_practicas=datos.fecha_inicio_practicas or datetime.now(TZ_PERU).date(),
     )
 
     db.add(usuario)
@@ -202,6 +203,7 @@ def crear_usuario(
             "email": usuario.email,
             "rol": usuario.rol,
             "activo": usuario.activo,
+            "fecha_inicio_practicas": usuario.fecha_inicio_practicas,
         },
     )
 
@@ -242,6 +244,7 @@ def editar_usuario(
         "email": usuario.email,
         "rol": usuario.rol,
         "activo": usuario.activo,
+        "fecha_inicio_practicas": usuario.fecha_inicio_practicas,
     }
 
     if cambios.get("email") is not None:
@@ -260,6 +263,9 @@ def editar_usuario(
 
     if cambios.get("activo") is not None:
         usuario.activo = cambios["activo"]
+
+    if "fecha_inicio_practicas" in cambios:
+        usuario.fecha_inicio_practicas = cambios["fecha_inicio_practicas"]
 
     if cambios.get("password"):
         usuario.password_hash = hash_password(cambios["password"])
@@ -281,6 +287,7 @@ def editar_usuario(
             "email": usuario.email,
             "rol": usuario.rol,
             "activo": usuario.activo,
+            "fecha_inicio_practicas": usuario.fecha_inicio_practicas,
         },
     )
 

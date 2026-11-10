@@ -39,6 +39,7 @@ def _serializar_perfil(usuario: Usuario, perfil: PerfilUsuario) -> Dict[str, Any
         "dni": perfil.dni,
         "direccion": perfil.direccion,
         "fecha_nacimiento": perfil.fecha_nacimiento,
+        "fecha_inicio_practicas": usuario.fecha_inicio_practicas,
         "puesto": perfil.puesto,
         "avatar_url": perfil.avatar_url,
     }
@@ -121,6 +122,9 @@ def _actualizar_perfil(
                     detail="Ya existe un usuario con ese email",
                 )
             usuario.email = email
+
+    if "fecha_inicio_practicas" in cambios:
+        usuario.fecha_inicio_practicas = cambios.pop("fecha_inicio_practicas")
 
     for campo, valor in cambios.items():
         setattr(perfil, campo, valor)

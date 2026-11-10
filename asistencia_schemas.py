@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class RegistroAsistenciaOut(BaseModel):
@@ -29,6 +29,7 @@ class ResumenAsistenciaUsuario(BaseModel):
     usuario_nombre: str
     usuario_email: str
     rol: str
+    horas_acumuladas: float = 0.0
     avatar_url: Optional[str] = None
     entrada: Optional[datetime] = None
     break_inicio: Optional[datetime] = None
@@ -50,3 +51,14 @@ class AsistenciaHoyResponse(BaseModel):
     registros: List[RegistroAsistenciaOut]
     estado: str
     justificacion_falta: Optional[JustificacionFalta] = None
+
+
+class HistorialManualCrear(BaseModel):
+    usuario_id: int = Field(gt=0)
+    horas_acumuladas: float = Field(ge=0)
+
+
+class HistorialManualOut(BaseModel):
+    usuario_id: int
+    horas_acumuladas: float
+    actualizado_en: datetime

@@ -19,6 +19,7 @@ class UsuarioCrear(BaseModel):
     email: EmailStr
     password: str
     rol: str = "PRACTICANTE" # El admin puede enviar el rol, por defecto es practicante
+    fecha_inicio_practicas: Optional[date] = None
 # Para login
 class LoginRequest(BaseModel):
     email: EmailStr
@@ -32,6 +33,7 @@ class UsuarioOut(BaseModel):
     email: str
     rol: str
     activo: bool
+    fecha_inicio_practicas: Optional[date] = None
     creado_en: datetime
     actualizado_en: Optional[datetime]
     
@@ -211,6 +213,7 @@ class UsuarioEditar(BaseModel):
     password: Optional[str] = None
     rol: Optional[str] = None
     activo: Optional[bool] = None
+    fecha_inicio_practicas: Optional[date] = None
 
 class TiempoEditarAdmin(BaseModel):
     inicio: Optional[datetime] = None
