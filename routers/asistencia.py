@@ -316,11 +316,13 @@ def _tiempo_efectivo_dia(
         for inicio, fin in segmentos_break
         if fin >= entrada and inicio <= fin_jornada
     )
-    segundos_efectivos = max(
-        0,
-        int((fin_jornada - entrada).total_seconds()) - segundos_break,
+    # Regla de negocio: el break es solo informativo, NO se descuenta del total.
+    segundos_efectivos = max(0, int((fin_jornada - entrada).total_seconds()))
+    return (
+        segundos_efectivos,
+        segundos_break,
+        int((fin_jornada - entrada).total_seconds()),
     )
-    return segundos_efectivos, segundos_break, int((fin_jornada - entrada).total_seconds())
 
 
 @router.get("/resumen-horas")
