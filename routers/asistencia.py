@@ -234,18 +234,33 @@ def _deuda_horas_semanas_finalizadas(
     lunes_actual: date,
 ) -> int:
     lunes_semana_anterior = lunes_actual - timedelta(days=7)
+    domingo_semana_anterior = lunes_semana_anterior + timedelta(days=6)
 
-    fecha_inicio_practicas = (
-        db.query(Usuario.fecha_inicio_practicas)
+    fechas_usuario = (
+        db.query(
+            Usuario.fecha_inicio_rastreo,
+            Usuario.fecha_inicio_practicas,
+        )
         .filter(Usuario.id == usuario_id)
-        .scalar()
+        .first()
+    )
+    fecha_inicio_rastreo, fecha_inicio_practicas = (
+        fechas_usuario if fechas_usuario is not None else (None, None)
     )
 
-    if fecha_inicio_practicas is not None:
+    # El inicio de rastreo manda: las semanas anteriores al corte no generan
+    # deuda. La semana en la que cae el corte también se condona para no
+    # cobrar deuda por días previos al corte (mismo criterio que ya se usaba
+    # con fecha_inicio_practicas).
+    if fecha_inicio_rastreo is not None:
+        if lunes_semana_anterior < fecha_inicio_rastreo:
+            return 0
+        corte = fecha_inicio_rastreo
+    elif fecha_inicio_practicas is not None:
         if lunes_semana_anterior < fecha_inicio_practicas:
             return 0
+        corte = fecha_inicio_practicas
     else:
-        domingo_semana_anterior = lunes_semana_anterior + timedelta(days=6)
         primer_registro = (
             db.query(RegistroAsistencia)
             .filter(RegistroAsistencia.usuario_id == usuario_id)
@@ -258,10 +273,13 @@ def _deuda_horas_semanas_finalizadas(
         fecha_primer_registro = _normalizar_hora(primer_registro.hora).date()
         if fecha_primer_registro > domingo_semana_anterior:
             return 0
+        corte = None
 
     segundos_deuda = 0
     for dia in range(7):
         fecha_dia = lunes_semana_anterior + timedelta(days=dia)
+        if corte is not None and fecha_dia < corte:
+            continue
         efectivo, _, _ = _tiempo_efectivo_dia(
             _registros_fecha(db, usuario_id, fecha_dia),
             datetime.combine(fecha_dia, time.max, tzinfo=TZ_PERU),
@@ -381,9 +399,12 @@ def resumen_horas(
             break
         registros_semana.extend(_registros_fecha(db, usuario.id, fecha_dia))
 
+    corte_semana = usuario.fecha_inicio_rastreo
     segundos_semana = 0
     for dia in range((fecha_fin_semana - lunes).days + 1):
         fecha_dia = lunes + timedelta(days=dia)
+        if corte_semana is not None and fecha_dia < corte_semana:
+            continue
         efectivo, _, _ = _tiempo_efectivo_dia(
             _registros_fecha(db, usuario.id, fecha_dia),
             ahora if fecha_dia == _fecha_hoy() else datetime.combine(
@@ -595,11 +616,18 @@ def _resumen_usuarios(
         if inicio_break is not None and fin_break is not None:
             duracion_break = int((fin_break - inicio_break).total_seconds())
         avatar_url = perfil.avatar_url if perfil else None
+        # El inicio de rastreo manda; si no existe, se mantiene el filtro
+        # actual por fecha_inicio_practicas (o todo el historial si es NULL).
+        corte_acumulado = (
+            usuario.fecha_inicio_rastreo
+            if usuario.fecha_inicio_rastreo is not None
+            else usuario.fecha_inicio_practicas
+        )
         segundos_acumulados = 0
         for fecha_registro, eventos_dia in dias_registrados.items():
             if (
-                usuario.fecha_inicio_practicas is not None
-                and fecha_registro < usuario.fecha_inicio_practicas
+                corte_acumulado is not None
+                and fecha_registro < corte_acumulado
             ):
                 continue
             fin_jornada = (
@@ -622,6 +650,8 @@ def _resumen_usuarios(
                 usuario_email=usuario.email,
                 rol=usuario.rol or "",
                 horas_acumuladas=segundos_acumulados / 3600,
+                fecha_inicio_practicas=usuario.fecha_inicio_practicas,
+                fecha_inicio_rastreo=usuario.fecha_inicio_rastreo,
                 avatar_url=avatar_url,
                 entrada=horas.get("ENTRADA"),
                 break_inicio=inicio_break,

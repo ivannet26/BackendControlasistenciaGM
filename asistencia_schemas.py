@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
@@ -30,6 +30,8 @@ class ResumenAsistenciaUsuario(BaseModel):
     usuario_email: str
     rol: str
     horas_acumuladas: float = 0.0
+    fecha_inicio_practicas: Optional[date] = None
+    fecha_inicio_rastreo: Optional[date] = None
     avatar_url: Optional[str] = None
     entrada: Optional[datetime] = None
     break_inicio: Optional[datetime] = None

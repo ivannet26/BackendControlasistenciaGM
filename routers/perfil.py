@@ -1,4 +1,6 @@
+from datetime import datetime
 from typing import Any, Dict
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
@@ -8,11 +10,13 @@ from auditoria_helper import registrar_auditoria
 from database import get_db
 from models import Usuario
 from perfil_models import PerfilUsuario
-from perfil_schemas import PerfilEditar, PerfilOut
+from perfil_schemas import InicioRastreoCrear, PerfilEditar, PerfilOut
 from security import get_usuario_actual
 
 
 router = APIRouter(prefix="/perfil", tags=["Perfil"])
+
+TZ_PERU = ZoneInfo("America/Lima")
 
 
 def _obtener_o_crear_perfil(db: Session, usuario: Usuario) -> PerfilUsuario:
@@ -40,6 +44,7 @@ def _serializar_perfil(usuario: Usuario, perfil: PerfilUsuario) -> Dict[str, Any
         "direccion": perfil.direccion,
         "fecha_nacimiento": perfil.fecha_nacimiento,
         "fecha_inicio_practicas": usuario.fecha_inicio_practicas,
+        "fecha_inicio_rastreo": usuario.fecha_inicio_rastreo,
         "puesto": perfil.puesto,
         "avatar_url": perfil.avatar_url,
     }
@@ -71,6 +76,63 @@ def actualizar_mi_perfil(
     usuario: Usuario = Depends(get_usuario_actual),
 ):
     return _actualizar_perfil(db, usuario, datos)
+
+
+@router.put("/inicio-rastreo", response_model=PerfilOut)
+def configurar_inicio_rastreo(
+    datos: InicioRastreoCrear,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_usuario_actual),
+):
+    """Fija por única vez la fecha desde la que se cuentan horas y deudas."""
+    usuario = (
+        db.query(Usuario)
+        .filter(Usuario.id == usuario.id)
+        .with_for_update()
+        .first()
+    )
+    if usuario is None:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    if usuario.fecha_inicio_rastreo is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "El inicio de rastreo ya fue configurado ("
+                f"{usuario.fecha_inicio_rastreo.isoformat()}) y no se puede "
+                "modificar"
+            ),
+        )
+
+    if datos.fecha_inicio_rastreo > datetime.now(TZ_PERU).date():
+        raise HTTPException(
+            status_code=400,
+            detail="La fecha de inicio de rastreo no puede ser futura",
+        )
+
+    usuario.fecha_inicio_rastreo = datos.fecha_inicio_rastreo
+    perfil = _obtener_o_crear_perfil(db, usuario)
+
+    registrar_auditoria(
+        db=db,
+        usuario=usuario,
+        accion="EDITAR",
+        entidad="PERFIL",
+        entidad_id=usuario.id,
+        entidad_nombre=f"{usuario.nombre} {usuario.apellido}",
+        detalle=(
+            "Configuró su inicio de rastreo en "
+            f"{datos.fecha_inicio_rastreo.isoformat()}"
+        ),
+        datos_anteriores={"fecha_inicio_rastreo": None},
+        datos_nuevos={
+            "fecha_inicio_rastreo": datos.fecha_inicio_rastreo.isoformat()
+        },
+    )
+
+    db.commit()
+    db.refresh(perfil)
+    return _serializar_perfil(usuario, perfil)
 
 
 def _actualizar_perfil(

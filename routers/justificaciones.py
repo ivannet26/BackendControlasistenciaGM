@@ -115,20 +115,22 @@ async def crear_justificacion(
             detail="Tipo de justificación inválido",
         )
 
+    # Cuenta los intentos del mismo usuario, tipo y fecha sin importar el estado:
+    # PENDIENTE, ACEPTADA, RECHAZADA o INJUSTIFICADA.
     intentos_existentes = (
         db.query(func.count(Justificacion.id))
         .filter(
-        Justificacion.usuario_id == usuario.id,
-        Justificacion.tipo == tipo,
-        Justificacion.fecha == fecha,
+            Justificacion.usuario_id == usuario.id,
+            Justificacion.tipo == tipo,
+            Justificacion.fecha == fecha,
         )
         .scalar()
         or 0
     )
     if intentos_existentes >= 2:
         raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Has alcanzado el límite de 2 intentos",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Has alcanzado el límite de 2 intentos para esta fecha y tipo",
         )
 
     contenido_evidencia = None
@@ -198,7 +200,7 @@ async def crear_justificacion(
         if "uq_justificacion_intento" in str(error).lower():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Has alcanzado el límite de 2 intentos",
+                detail="Has alcanzado el límite de 2 intentos para esta fecha y tipo",
             ) from error
         raise
     db.refresh(justificacion)
