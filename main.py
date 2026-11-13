@@ -27,6 +27,7 @@ import asistencia_models  # noqa: F401
 import horario_models  # noqa: F401
 import perfil_models  # noqa: F401
 import justificacion_models  # noqa: F401
+import refresh_models  # noqa: F401
 
 load_dotenv()
 

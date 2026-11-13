@@ -27,6 +27,7 @@ from perfil_models import PerfilUsuario
 from perfil_schemas import CambiarPasswordRequest, PerfilEditar, PerfilOut
 from r2_client import R2_PUBLIC_URL, eliminar_archivo_r2, subir_archivo_r2
 from rastreador_models import TiempoRegistro
+from refresh_tokens import revocar_refresh_de_usuario
 from routers.perfil import _actualizar_perfil
 from security import (
     get_usuario_actual,
@@ -270,6 +271,10 @@ def editar_usuario(
     if cambios.get("password"):
         usuario.password_hash = hash_password(cambios["password"])
 
+    # Cambiar la contraseña o desactivar la cuenta invalida sus refresh tokens.
+    if cambios.get("password") or cambios.get("activo") is False:
+        revocar_refresh_de_usuario(db, usuario.id)
+
     db.flush()
 
     registrar_auditoria(
@@ -320,6 +325,7 @@ def desactivar_usuario(
 
     # 2. Marcar como inactivo
     usuario.activo = False
+    revocar_refresh_de_usuario(db, usuario.id)
 
     db.flush()
 
@@ -459,6 +465,7 @@ def cambiar_mi_password(
         )
 
     usuario.password_hash = hash_password(datos.password_nueva)
+    revocar_refresh_de_usuario(db, usuario.id)
     db.flush()
     registrar_auditoria(
         db=db,

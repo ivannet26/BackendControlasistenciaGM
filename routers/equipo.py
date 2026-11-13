@@ -14,6 +14,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from rastreador_models import TiempoRegistro
 from sesiones import revocar_todas
+from refresh_tokens import revocar_refresh_de_usuario
 
 TZ_PERU = ZoneInfo("America/Lima")
 router = APIRouter(prefix="/equipo", tags=["Equipo"])
@@ -565,6 +566,7 @@ def deslogear_usuario(
     # 1. Desactivar la cuenta y cerrar todas sus sesiones
     usuario_objetivo.activo = False
     sesiones_cerradas = revocar_todas(db, usuario_id, "CUENTA_DESACTIVADA")
+    revocar_refresh_de_usuario(db, usuario_id)
 
     # 2. Cerrar todos los TiempoRegistro abiertos
     ahora = datetime.now(TZ_PERU)
