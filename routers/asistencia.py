@@ -28,6 +28,29 @@ TZ_PERU = ZoneInfo("America/Lima")
 router = APIRouter(prefix="/asistencia", tags=["Asistencia"])
 
 META_SEMANAL_BASE_HORAS = 40.0
+META_SEMANAL_BASE_SEGUNDOS = int(META_SEMANAL_BASE_HORAS * 3600)  # 144000
+# Tope semanal usado solo para el cálculo de deuda. Las horas extra por
+# encima de 40 h no reducen la deuda ni la meta de la semana siguiente.
+TOPE_SEMANAL_DEUDA_SEGUNDOS = META_SEMANAL_BASE_SEGUNDOS  # 144000
+
+
+def _segundos_computables_semana(segundos_trabajados: int) -> int:
+    """Horas de una semana que cuentan para la deuda (máximo 40 h).
+
+    Las horas extra se siguen mostrando en el tiempo trabajado y en el
+    acumulado histórico, pero aquí se recortan: no compensan faltantes de
+    esa semana ni reducen la meta de la semana siguiente.
+    """
+    return max(0, min(int(segundos_trabajados), TOPE_SEMANAL_DEUDA_SEGUNDOS))
+
+
+def _deuda_semana_desde_segundos(segundos_trabajados: int) -> int:
+    """Deuda de una semana ya finalizada, ignorando las horas extra."""
+    return max(
+        0,
+        META_SEMANAL_BASE_SEGUNDOS
+        - _segundos_computables_semana(segundos_trabajados),
+    )
 
 
 def _rango_fecha(fecha: date) -> tuple[datetime, datetime]:
@@ -275,7 +298,7 @@ def _deuda_horas_semanas_finalizadas(
             return 0
         corte = None
 
-    segundos_deuda = 0
+    segundos_trabajados = 0
     for dia in range(7):
         fecha_dia = lunes_semana_anterior + timedelta(days=dia)
         if corte is not None and fecha_dia < corte:
@@ -284,12 +307,13 @@ def _deuda_horas_semanas_finalizadas(
             _registros_fecha(db, usuario_id, fecha_dia),
             datetime.combine(fecha_dia, time.max, tzinfo=TZ_PERU),
         )
-        segundos_deuda += efectivo
+        segundos_trabajados += efectivo
 
-    return max(
-        0,
-        int(META_SEMANAL_BASE_HORAS * 3600) - segundos_deuda,
-    )
+    # Regla de negocio: la meta semanal es siempre 40 h y las horas extra de
+    # la semana no generan crédito. Se aplica el tope una sola vez, sobre el
+    # total de la semana (no por día), porque el excedente de un día puede
+    # compensar un faltante de otro dentro de la misma semana.
+    return _deuda_semana_desde_segundos(segundos_trabajados)
 
 
 def _registros_fecha(db: Session, usuario_id: int, fecha: date) -> list[RegistroAsistencia]:
