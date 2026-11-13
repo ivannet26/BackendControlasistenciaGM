@@ -14,11 +14,17 @@ class PerfilOut(BaseModel):
     dni: Optional[str] = None
     direccion: Optional[str] = None
     fecha_nacimiento: Optional[date] = None
+    fecha_inicio_practicas: Optional[date] = None
+    fecha_inicio_rastreo: Optional[date] = None
     puesto: Optional[str] = None
     avatar_url: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+
+class InicioRastreoCrear(BaseModel):
+    fecha_inicio_rastreo: date
 
 
 class PerfilEditar(BaseModel):
@@ -29,6 +35,7 @@ class PerfilEditar(BaseModel):
     dni: Optional[str] = Field(None, max_length=20)
     direccion: Optional[str] = Field(None, max_length=255)
     fecha_nacimiento: Optional[date] = None
+    fecha_inicio_practicas: Optional[date] = None
     puesto: Optional[str] = Field(None, max_length=100)
     avatar_url: Optional[str] = Field(None, max_length=500)
 

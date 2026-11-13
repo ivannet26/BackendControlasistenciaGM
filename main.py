@@ -16,6 +16,7 @@ from routers import auditoria as auditoria_router
 from routers import asistencia as asistencia_router
 from routers import horario as horario_router
 from routers import perfil as perfil_router
+from routers import justificaciones
 import auditoria_models  # noqa: F401
 import rastreador_models  # noqa: F401
 import equipo_models  # noqa: F401
@@ -25,6 +26,7 @@ import proyecto_auditoria_models  # noqa: F401
 import asistencia_models  # noqa: F401
 import horario_models  # noqa: F401
 import perfil_models  # noqa: F401
+import justificacion_models  # noqa: F401
 import refresh_models  # noqa: F401
 
 load_dotenv()
@@ -69,6 +71,7 @@ app.include_router(auditoria_router.router)
 app.include_router(asistencia_router.router)
 app.include_router(horario_router.router)
 app.include_router(perfil_router.router)
+app.include_router(justificaciones.router)
 
 # ── Health check ──────────────────────────────────────────────────────────────
 @app.get("/", tags=["Root"])

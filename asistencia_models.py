@@ -1,7 +1,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -35,3 +35,27 @@ class RegistroAsistencia(Base):
     )
 
     usuario = relationship("Usuario", foreign_keys=[usuario_id])
+
+
+class HistorialHorasPracticas(Base):
+    __tablename__ = "historial_horas_practicas"
+    __table_args__ = (
+        UniqueConstraint(
+            "usuario_id",
+            name="uq_historial_horas_practicas_usuario",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    usuario_id = Column(
+        Integer,
+        ForeignKey("usuariosPrueba.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    horas_acumuladas = Column(Numeric(10, 2), nullable=False, default=0)
+    actualizado_en = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(TZ_PERU),
+        onupdate=lambda: datetime.now(TZ_PERU),
+    )
