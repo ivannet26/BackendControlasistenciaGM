@@ -1,13 +1,16 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, StringConstraints
 from datetime import datetime
-from typing import Optional, List
+from typing import Annotated, Optional, List
+
+NombreGrupo = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+NombreEtiqueta = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
 
 class GrupoCrear(BaseModel):
-    nombre: str
+    nombre: NombreGrupo
     descripcion: Optional[str] = None
 
 class GrupoEditar(BaseModel):
-    nombre: Optional[str] = None
+    nombre: Optional[NombreGrupo] = None
     descripcion: Optional[str] = None
 
 class GrupoOut(BaseModel):
@@ -21,11 +24,11 @@ class GrupoOut(BaseModel):
         from_attributes = True
 
 class EtiquetaCrear(BaseModel):
-    nombre: str
+    nombre: NombreEtiqueta
     color: Optional[str] = None
 
 class EtiquetaEditar(BaseModel):
-    nombre: Optional[str] = None
+    nombre: Optional[NombreEtiqueta] = None
     color: Optional[str] = None
 
 class EtiquetaOut(BaseModel):
@@ -60,6 +63,7 @@ class MiembroOut(BaseModel):
     nombre_grupo: Optional[str]
     tipo_usuario: str
     estado: str
+    cuenta_activa: Optional[bool] = None
     tiene_clave_temp: bool
     clave_temp_mascara: Optional[str]
     etiquetas: List[EtiquetaOut]

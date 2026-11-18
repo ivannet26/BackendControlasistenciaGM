@@ -1,12 +1,14 @@
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, StringConstraints, field_validator
 from datetime import datetime
-from typing import Optional, List
+from typing import Annotated, Optional, List
+
+NombreCliente = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=150)]
 
 
 # ── CLIENTE ───────────────────────────────────────────────────────────────────
 
 class ClienteCrear(BaseModel):
-    nombre: str
+    nombre: NombreCliente
     email: Optional[EmailStr] = None
     # Lista de hasta 3 correos en copia
     destinatarios_cc: Optional[List[EmailStr]] = []
@@ -23,7 +25,7 @@ class ClienteCrear(BaseModel):
 
 
 class ClienteEditar(BaseModel):
-    nombre: Optional[str] = None
+    nombre: Optional[NombreCliente] = None
     email: Optional[EmailStr] = None
     destinatarios_cc: Optional[List[EmailStr]] = None
     direccion: Optional[str] = None

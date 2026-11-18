@@ -429,10 +429,12 @@ def editar_proyecto(
 
         proyecto.nombre = datos.nombre
 
-    if datos.descripcion is not None:
+    if "descripcion" in datos.model_fields_set:
         proyecto.descripcion = datos.descripcion
 
-    if datos.cliente_id is not None:
+    if "cliente_id" in datos.model_fields_set and datos.cliente_id is None:
+        proyecto.cliente_id = None
+    elif datos.cliente_id is not None and datos.cliente_id != proyecto.cliente_id:
 
         cliente = (
             db.query(Cliente)
@@ -457,7 +459,7 @@ def editar_proyecto(
     if datos.estado is not None:
         proyecto.estado = datos.estado.upper()
 
-    if datos.color is not None:
+    if "color" in datos.model_fields_set:
         proyecto.color = datos.color
 
     registrar_auditoria(

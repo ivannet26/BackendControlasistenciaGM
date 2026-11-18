@@ -5,6 +5,7 @@ from typing import List, Optional
 from database import get_db
 from models import Usuario
 from cliente_models import Cliente
+from proyecto_models import Proyecto
 from cliente_schemas import ClienteCrear, ClienteEditar, ClienteOut
 from security import get_usuario_actual, requiere_admin
 from auditoria_helper import registrar_auditoria
@@ -92,6 +93,9 @@ def crear_cliente(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(requiere_admin),
 ):
+    if db.query(Cliente.id).filter(Cliente.nombre == datos.nombre).first():
+        raise HTTPException(status_code=409, detail="Ya existe un cliente con ese nombre")
+
     cc_str = ",".join(datos.destinatarios_cc) if datos.destinatarios_cc else None
 
     cliente = Cliente(
@@ -138,15 +142,18 @@ def editar_cliente(
 
     snapshot_anterior = _snapshot_cliente(cliente)
 
-    if datos.nombre is not None:
+    if datos.nombre is not None and datos.nombre != cliente.nombre:
+        duplicado = db.query(Cliente.id).filter(Cliente.nombre == datos.nombre, Cliente.id != cliente_id).first()
+        if duplicado:
+            raise HTTPException(status_code=409, detail="Ya existe un cliente con ese nombre")
         cliente.nombre = datos.nombre
-    if datos.email is not None:
+    if "email" in datos.model_fields_set:
         cliente.email = datos.email
     if datos.destinatarios_cc is not None:
         cliente.destinatarios_cc = ",".join(datos.destinatarios_cc)
-    if datos.direccion is not None:
+    if "direccion" in datos.model_fields_set:
         cliente.direccion = datos.direccion
-    if datos.nota is not None:
+    if "nota" in datos.model_fields_set:
         cliente.nota = datos.nota
     if datos.moneda is not None:
         cliente.moneda = datos.moneda.upper()
@@ -253,6 +260,9 @@ def eliminar_cliente(
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    if db.query(Proyecto.id).filter(Proyecto.cliente_id == cliente_id).first():
+        raise HTTPException(status_code=409, detail="Desvincula los proyectos de este cliente antes de eliminarlo")
 
     snapshot_anterior = _snapshot_cliente(cliente)
     nombre = cliente.nombre

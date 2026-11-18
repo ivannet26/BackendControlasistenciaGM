@@ -1,8 +1,8 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
-from typing import Optional, List, Any
+from pydantic import BaseModel, StringConstraints
+from typing import Annotated, Optional, List, Any
 from datetime import datetime
 from pydantic import BaseModel
 
@@ -21,8 +21,11 @@ class ProyectoAuditoriaOut(BaseModel):
     class Config:
         from_attributes = True
 
+NombreProyecto = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+
+
 class ProyectoCrear(BaseModel):
-    nombre: str
+    nombre: NombreProyecto
     descripcion: Optional[str] = None
     cliente_id: Optional[int] = None
     estado: str = "ACTIVO"
@@ -30,7 +33,7 @@ class ProyectoCrear(BaseModel):
 
 
 class ProyectoEditar(BaseModel):
-    nombre: Optional[str] = None
+    nombre: Optional[NombreProyecto] = None
     descripcion: Optional[str] = None
     cliente_id: Optional[int] = None
     estado: Optional[str] = None

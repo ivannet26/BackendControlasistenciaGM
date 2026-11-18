@@ -133,7 +133,7 @@ def editar_etiqueta(
             )
         etiqueta.nombre = datos.nombre
 
-    if datos.color is not None:
+    if "color" in datos.model_fields_set:
         etiqueta.color = datos.color
 
     db.flush()
