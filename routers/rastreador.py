@@ -762,6 +762,13 @@ def iniciar_temporizador(
         duracion_segundos=0
     )
 
+    if datos.etiquetas_ids:
+        nuevo_registro.etiquetas = (
+            db.query(Etiqueta)
+            .filter(Etiqueta.id.in_(datos.etiquetas_ids), Etiqueta.archivado.is_(False))
+            .all()
+        )
+
     db.add(nuevo_registro)
     db.commit()
     

@@ -106,6 +106,7 @@ def _construir_miembro_out(miembro: MiembroEquipo) -> dict:
         "nombre_grupo": miembro.grupo.nombre if miembro.grupo else None,
         "tipo_usuario": miembro.tipo_usuario,
         "estado": miembro.estado,
+        "cuenta_activa": miembro.usuario.activo,
         "tiene_clave_temp": tiene_clave,
         "clave_temp_mascara": "********" if tiene_clave else None,
         "etiquetas": miembro.etiquetas,
@@ -371,7 +372,7 @@ def editar_miembro(
     campos_sensibles = (
         datos.tipo_usuario is not None
         or datos.estado is not None
-        or datos.grupo_id is not None
+        or "grupo_id" in datos.model_fields_set
     )
 
     if campos_sensibles:
@@ -382,7 +383,9 @@ def editar_miembro(
         )
 
     # ── Aplicar cambios ────────────────────────────────────────────────────────
-    if datos.grupo_id is not None:
+    if "grupo_id" in datos.model_fields_set and datos.grupo_id is None:
+        miembro.grupo_id = None
+    elif datos.grupo_id is not None:
         grupo = db.query(Grupo).filter(Grupo.id == datos.grupo_id).first()
         if not grupo:
             raise HTTPException(status_code=404, detail="Grupo no encontrado")
