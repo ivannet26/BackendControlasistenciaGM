@@ -1,7 +1,7 @@
 from datetime import timedelta
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 
 import models
@@ -20,32 +20,6 @@ from database import get_db
 router = APIRouter(prefix="/auth", tags=["Autenticación"])
 
 ROLES_ADMIN = {"ADMINISTRACION", "ADMINISTRADOR", "ADMIN"}
-
-
-# ── POST /auth/registro ───────────────────────────────────────────────────────
-
-@router.post("/registro", response_model=schemas.UsuarioOut, status_code=status.HTTP_201_CREATED)
-def registro(datos: schemas.UsuarioRegistro, db: Session = Depends(get_db)):
-    existe = db.query(models.Usuario).filter(models.Usuario.email == datos.email).first()
-    if existe:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Ya existe un usuario con ese email",
-        )
-
-    nuevo_usuario = models.Usuario(
-        nombre=datos.nombre,
-        apellido=datos.apellido,
-        email=datos.email,
-        password_hash=hash_password(datos.password),
-        rol="PRACTICANTE",
-        activo=True
-    )
-
-    db.add(nuevo_usuario)
-    db.commit()
-    db.refresh(nuevo_usuario)
-    return nuevo_usuario
 
 
 # ── POST /auth/login ──────────────────────────────────────────────────────────
